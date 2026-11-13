@@ -1,0 +1,3687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Naruto Storm 4 - 2D Fan Game</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #0a0a14; overflow: hidden; font-family: 'Trebuchet MS', Arial, sans-serif; color: #f0f0f5; }
+  #wrap { display: flex; align-items: center; justify-content: center; width: 100vw; height: 100vh; }
+  canvas { background: #1a2030; max-width: 100%; max-height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; box-shadow: 0 0 40px rgba(255,180,60,0.3); }
+  #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 24px; text-align: center; }
+  #loading .bar { width: 320px; height: 12px; background: #2a2a40; margin-top: 12px; border: 1px solid #555; }
+  #loading .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffaa30, #ff6600); transition: width 0.1s; }
+  #hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); color: #888; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="1280" height="720"></canvas>
+</div>
+<div id="loading">
+  <div>Loading Naruto Storm 4...</div>
+  <div class="bar"><div class="fill" id="loadFill"></div></div>
+</div>
+<div id="hint" style="display:none;"></div>
+<script>
+// ============================================================================
+// NARUTO STORM 4 - 2D FAN GAME (HTML5 Edition)
+// Single-file port of the pygame-ce version to HTML5 Canvas + JavaScript.
+// ============================================================================
+
+'use strict';
+
+// ---------- CONFIG / CONSTANTS ----------
+const CFG = {
+  SCREEN_W: 1280, SCREEN_H: 720, FPS: 60,
+  FLOOR_Y: 620, CEILING_Y: 60,
+  LEFT_WALL: 90, RIGHT_WALL: 1190,
+  GRAVITY: 0.9, WALK_SPEED: 4.2, RUN_SPEED: 6.5,
+  JUMP_VY: -16.5, AIR_DASH_VX: 14,
+  WALL_RUN_VY: -5, WALL_SLIDE_VY: 2,
+  MAX_HEALTH: 1000, MAX_CHAKRA: 100,
+  CHAKRA_REGEN: 0.35, CHAKRA_LOAD_RATE: 1.4,
+  CHAKRA_DASH_COST: 25, NINJUTSU_COST: 40, ULTIMATE_COST: 75, COUNTER_COST: 30,
+  SHURIKEN_COST: 15, ASSIST_STORM_COST: 25,
+  SHURIKEN_DAMAGE: 12, SHURIKEN_SPEED: 14,
+  MAX_SUBSTITUTION: 4, MAX_STORM: 100,
+  STORM_PER_HIT: 1.5, STORM_PER_SWITCH: 8,
+  DMG_COMBO_LIGHT: 18, DMG_COMBO_HEAVY: 28, DMG_TILT: 22, DMG_GRAB: 35, DMG_AIR_COMBO: 20,
+  DMG_NINJUTSU: 90, DMG_ULTIMATE: 220, DMG_LINKED_SECRET: 380, DMG_COUNTER: 15,
+  KNOCKBACK_LIGHT: 7, KNOCKBACK_HEAVY: 12, KNOCKBACK_LAUNCH: 14, KNOCKBACK_SLAM: 11, KNOCKBACK_ULT: 20,
+  HITSTUN_LIGHT: 18, HITSTUN_HEAVY: 28, HITSTUN_LAUNCH: 40, HITSTUN_ULT: 80,
+  SUB_I_FRAMES: 18,
+  AWAKEN_HEALTH_THRESHOLD: 0.30, AWAKEN_DURATION: 600,
+  AWAKEN_DAMAGE_BOOST: 1.4, AWAKEN_SPEED_BOOST: 1.3, AWAKEN_CHAKRA_BOOST: 2.0,
+};
+
+const COLORS = {
+  BG_TOP: '#1c2438', BG_BOT: '#080c18', FLOOR: '#3c3226', WALL: '#5a5046',
+  HEALTH: '#ff5050', HEALTH_BACK: '#280c0c', HEALTH_TRAIL: '#fafac8',
+  CHAKRA: '#5ac8ff', CHAKRA_BACK: '#0c1e32',
+  STORM: '#ffc850', SUB: '#ffe664', TEXT: '#f0f0f5', TEXT_DIM: '#a0a0b4',
+  ACCENT: '#ffb43c', P1: '#ffd87a', P2: '#8cdcff',
+};
+
+const CHARS_DATA = {
+  naruto:  { display: 'Naruto',  subtitle: 'Hero of the Leaf',          color: '#ffa500', ninjutsu: 'Rasengan',              ultimate: 'Tailed Beast Bomb',     linked: 'Team 7 Combo',         awakening: 'Kurama Chakra Mode', stats:{power:7,speed:8,range:5} },
+  sasuke:  { display: 'Sasuke',  subtitle: 'Last Uchiha',               color: '#5aaaff', ninjutsu: 'Chidori',              ultimate: 'Susanoo Slash',         linked: 'Team Hebi Strike',     awakening: 'Susanoo',           stats:{power:8,speed:7,range:6} },
+  sakura:  { display: 'Sakura',  subtitle: 'Cherry Blossom',            color: '#ff82aa', ninjutsu: 'Cherry Blossom Impact',ultimate: 'Hokage\'s Resolve',     linked: 'Team 7 Triple Strike', awakening: 'Byakugou Seal',     stats:{power:8,speed:6,range:4} },
+  kakashi: { display: 'Kakashi', subtitle: 'Copy Ninja',                color: '#b4b4c8', ninjutsu: 'Lightning Blade',      ultimate: 'Kamui Shuriken',        linked: 'Hokage Squad Combo',   awakening: 'Sharingan',         stats:{power:7,speed:7,range:7} },
+  gaara:   { display: 'Gaara',   subtitle: 'Kazekage of the Sand',      color: '#c8a050', ninjutsu: 'Sand Coffin',          ultimate: 'Shukaku Unleashed',     linked: 'Sand Alliance Combo',  awakening: 'Shukaku Form',      stats:{power:8,speed:5,range:8} },
+  hinata:  { display: 'Hinata',  subtitle: 'Byakugan Princess',         color: '#a0a0ff', ninjutsu: 'Gentle Fist',          ultimate: 'Eight Trigrams 64 Palms', linked: 'Hyuga Twin Strike',  awakening: 'Byakugan Full Open', stats:{power:6,speed:7,range:6} },
+  neji:    { display: 'Neji',    subtitle: 'Hyuga Prodigy',             color: '#d0c8a0', ninjutsu: 'Rotation',             ultimate: 'Eight Trigrams 64 Palms', linked: 'Hyuga Combo',        awakening: 'Byakugan',          stats:{power:7,speed:7,range:7} },
+  haku:    { display: 'Haku',    subtitle: 'Demon of the Hidden Mist',  color: '#80d0ff', ninjutsu: 'Senbon Rain',          ultimate: 'Demonic Ice Mirrors',   linked: 'Mist Village Combo',   awakening: 'Ice Mirror Domain', stats:{power:6,speed:9,range:7} },
+  rock_lee:{ display: 'Rock Lee',subtitle: 'Handsome Devil of the Leaf',color: '#50c050', ninjutsu: 'Primary Lotus',        ultimate: 'Hidden Lotus',          linked: 'Youth Combo',          awakening: 'Eight Gates',       stats:{power:9,speed:9,range:3} },
+  kisame:  { display: 'Kisame',  subtitle: 'Monster of the Hidden Mist',color: '#4080a0', ninjutsu: 'Water Shark Bomb',     ultimate: 'Great Shark Bullet',    linked: 'Akatsuki Combo',       awakening: 'Samehada Merge',    stats:{power:8,speed:6,range:7} },
+};
+
+const DEFAULT_TEAMS = {
+  P1: ['naruto', 'hinata', 'rock_lee'],
+  P2: ['sasuke', 'gaara', 'kisame'],
+};
+
+// ---------- INPUT MAPPINGS ----------
+const P1_KEYS = {
+  left: 'KeyA', right: 'KeyD', up: 'KeyW', down: 'KeyS',
+  jump: 'KeyK', attack: 'KeyJ', guard: 'KeyL', chakra: 'KeyI',
+  sub: 'KeyU', leader_prev: 'KeyQ', leader_next: 'KeyE',
+  shuriken: 'KeyF', assist: 'KeyR',
+};
+const P2_KEYS = {
+  left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown',
+  jump: 'Period', attack: 'Comma', guard: 'Slash', chakra: 'Semicolon',
+  // NOTE: leader_prev used to be 'KeyL', which is also P1's Guard key -> P1 blocking swapped P2's leader.
+  sub: 'KeyP', leader_prev: 'BracketLeft', leader_next: 'BracketRight',
+  shuriken: 'KeyM', assist: 'KeyN',
+};
+
+// ---------- STATE ENUMS ----------
+const ST = {
+  IDLE:'idle', WALK:'walk', JUMP:'jump', FALL:'fall',
+  ATTACK1:'attack1', ATTACK2:'attack2', ATTACK_UP:'attack_up', ATTACK_DN:'attack_dn',
+  AIR_ATK:'air_atk', TILT:'tilt', GRAB:'grab',
+  NINJUTSU:'ninjutsu', ULTIMATE:'ultimate', LINKED:'linked',
+  HIT:'hit', BLOCK:'block', SUB:'sub', CHAKRA_DASH:'chakra_dash',
+  SHURIKEN:'shuriken', ASSIST:'assist',
+  RASENSHURIKEN:'rasenshuriken', CLONES:'clone_barrage', RENDAN:'rendan',
+  FIREBALL:'fireball', KIRIN:'kirin', PHOENIX:'phoenix',
+  DEFEATED:'defeated', INTRO:'intro',
+};
+
+// Move data: startup/active/recovery in frames, damage, knockback, hitstun
+const MOVES = {
+  attack1:     { startup:4,  active:6, recovery:10, damage:CFG.DMG_COMBO_LIGHT,  kb:CFG.KNOCKBACK_LIGHT,  hs:CFG.HITSTUN_LIGHT,  branch:'attack2' },
+  attack2:     { startup:5,  active:6, recovery:14, damage:CFG.DMG_COMBO_HEAVY,  kb:CFG.KNOCKBACK_HEAVY,  hs:CFG.HITSTUN_HEAVY,  branch:null },
+  attack_up:   { startup:6,  active:6, recovery:14, damage:CFG.DMG_COMBO_LIGHT,  kb:CFG.KNOCKBACK_LAUNCH, hs:CFG.HITSTUN_LAUNCH, branch:null, launch:true },
+  attack_dn:   { startup:6,  active:6, recovery:16, damage:CFG.DMG_COMBO_HEAVY,  kb:CFG.KNOCKBACK_SLAM,   hs:CFG.HITSTUN_HEAVY,  branch:null, slam:true },
+  tilt:        { startup:6,  active:8, recovery:16, damage:CFG.DMG_TILT,         kb:CFG.KNOCKBACK_HEAVY,  hs:CFG.HITSTUN_HEAVY,  branch:null },
+  grab:        { startup:6,  active:4, recovery:20, damage:CFG.DMG_GRAB,         kb:CFG.KNOCKBACK_HEAVY*2,hs:CFG.HITSTUN_HEAVY,  branch:null, grab:true },
+  air_atk:     { startup:4,  active:8, recovery:10, damage:CFG.DMG_AIR_COMBO,    kb:CFG.KNOCKBACK_LIGHT,  hs:CFG.HITSTUN_LIGHT,  branch:null },
+  ninjutsu:    { startup:12, active:8, recovery:22, damage:CFG.DMG_NINJUTSU,     kb:CFG.KNOCKBACK_HEAVY*2,hs:CFG.HITSTUN_HEAVY*2,branch:null },
+  ultimate:    { startup:24, active:12,recovery:30, damage:CFG.DMG_ULTIMATE,     kb:CFG.KNOCKBACK_ULT,    hs:CFG.HITSTUN_ULT,    branch:null, cinematic:true },
+  linked:      { startup:30, active:16,recovery:40, damage:CFG.DMG_LINKED_SECRET,kb:CFG.KNOCKBACK_ULT,    hs:CFG.HITSTUN_ULT,    branch:null, cinematic:true },
+  chakra_dash: { startup:2,  active:0, recovery:6,  damage:0, kb:0, hs:0, branch:null, dash:true },
+  shuriken:    { startup:8,  active:4, recovery:12, damage:CFG.SHURIKEN_DAMAGE, kb:3, hs:12, branch:null, projectile:true },
+  assist:      { startup:6,  active:8, recovery:16, damage:30, kb:8, hs:20, branch:null, assist:true },
+  // --- Signature moves (Naruto / Sasuke) -------------------------------------------------
+  // cost = chakra. projectile:true = no melee hitbox (the move spawns a projectile / clones / bolt instead).
+  rasenshuriken:{ startup:22, active:4,  recovery:26, damage:0,  kb:0, hs:0,  branch:null, projectile:true, cost:60 },
+  clone_barrage:{ startup:12, active:6,  recovery:30, damage:0,  kb:0, hs:0,  branch:null, projectile:true, cost:35 },
+  rendan:       { startup:3,  active:30, recovery:10, damage:16, kb:7, hs:14, branch:null, multi:6,        cost:30 },
+  fireball:     { startup:16, active:4,  recovery:26, damage:0,  kb:0, hs:0,  branch:null, projectile:true, cost:40 },
+  kirin:        { startup:14, active:4,  recovery:34, damage:0,  kb:0, hs:0,  branch:null, projectile:true, cost:55 },
+  phoenix:      { startup:8,  active:6,  recovery:18, damage:0,  kb:0, hs:0,  branch:null, projectile:true, cost:30 },
+};
+
+// Signature moves: hold Chakra + a direction + Attack. up / down = on the ground, air = Down while airborne.
+// (Not enough chakra for the signature move -> you get the plain Ninjutsu instead.)
+const SIGNATURES = {
+  naruto:  { up: 'rasenshuriken', down: 'clone_barrage', air: 'rendan' },
+  sasuke:  { up: 'kirin',         down: 'fireball',      air: 'phoenix' },
+  // New characters reuse signature move types for gameplay variety (sprites still use base ninjutsu/ultimate frames)
+  gaara:   { up: 'kirin',         down: 'fireball',      air: 'phoenix' },   // sand pillars / projectiles
+  hinata:  { up: 'rasenshuriken', down: 'clone_barrage', air: 'rendan' },
+  neji:    { up: 'rasenshuriken', down: 'clone_barrage', air: 'rendan' },
+  haku:    { up: 'kirin',         down: 'fireball',      air: 'phoenix' },
+  rock_lee:{ up: 'rasenshuriken', down: 'clone_barrage', air: 'rendan' },
+  kisame:  { up: 'kirin',         down: 'fireball',      air: 'phoenix' },
+};
+const SIG_NAMES = {
+  rasenshuriken: 'RASENSHURIKEN!', clone_barrage: 'SHADOW CLONE BARRAGE!', rendan: 'UZUMAKI BARRAGE!',
+  fireball: 'GREAT FIREBALL!', kirin: 'KIRIN!', phoenix: 'PHOENIX FLOWER!',
+};
+// Which sprite frames a signature move uses (the atlases have no dedicated frames for them): [anim, frameIdx]
+const ANIM_MAP = {
+  naruto: {
+    rasenshuriken: [['ultimate', 3], ['ultimate', 3], ['shuriken', 2]],
+    clone_barrage: [['ninjutsu', 0], ['ninjutsu', 0], ['ninjutsu', 2]],
+    rendan:        [['air_atk', 0], ['air_atk', 1], ['air_atk', 2]],
+  },
+  sasuke: {
+    fireball: [['ninjutsu', 2], ['ninjutsu', 2]],
+    kirin:    [['ninjutsu', 1], ['ninjutsu', 1], ['ninjutsu', 2]],
+    phoenix:  [['ninjutsu', 2], ['shuriken', 2]],
+  },
+};
+// Glowing orb drawn in the hand during the plain Ninjutsu (frames come from the fx2 atlas)
+const HAND_ORBS = {
+  naruto: { anim: 'rasengan', dx: 72, dy: 92,  scale: 0.30 },
+  sasuke: { anim: 'chidori',  dx: 58, dy: 100, scale: 1.05 },
+};
+
+const ANIM_FPS = {
+  idle:6, walk:12, jump:8, fall:8,
+  attack1:18, attack2:16, attack_up:16, attack_dn:16, air_atk:16,
+  tilt:16, grab:14, ninjutsu:14, ultimate:14, linked:12,
+  hit:10, block:4, sub:16, chakra_dash:18, shuriken:16, assist:14, defeated:4, intro:6,
+  rasenshuriken:8, clone_barrage:12, rendan:16, fireball:10, kirin:10, phoenix:12,
+};
+
+// ============================================================================
+// ASSET MANAGER - loads atlases and provides frame metadata
+// ============================================================================
+class AssetManager {
+  constructor() {
+    this.atlases = {};   // character -> Image
+    this.metadata = null;
+    this.loaded = 0;
+    this.total = 7; // 6 atlases + 1 json
+  }
+
+  async loadAll(onProgress) {
+    // Load metadata first
+    const resp = await fetch('assets/atlases.json');
+    this.metadata = await resp.json();
+    onProgress(++this.loaded, this.total);
+
+    // Load each atlas image
+    const names = ['naruto', 'sasuke', 'sakura', 'kakashi', 'fx', 'fx2'];
+    const promises = names.map(name => this._loadImage(`assets/${name}_atlas.png`, name, onProgress));
+    await Promise.all(promises);
+  }
+
+  _loadImage(src, name, onProgress) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        this.atlases[name] = img;
+        onProgress(++this.loaded, this.total);
+        resolve(img);
+      };
+      img.onerror = () => { console.error(`Failed to load ${src}`); reject(new Error(src)); };
+      img.src = src;
+    });
+  }
+
+  // Get frame metadata for a character/state/frameIdx
+  // The atlases have no sprites for a few states (intro, sub, chakra_dash, linked).
+  // Fall back to a similar animation instead of drawing nothing (invisible fighter).
+  _resolveState(charMeta, state) {
+    const FALLBACK = { linked: 'ultimate', sub: 'fall', chakra_dash: 'jump', intro: 'idle', defeated: 'hit',
+      rasenshuriken: 'shuriken', clone_barrage: 'ninjutsu', rendan: 'air_atk', fireball: 'ninjutsu', kirin: 'ninjutsu', phoenix: 'air_atk' };
+    let s = state;
+    for (let i = 0; i < 3; i++) {
+      if (charMeta[s] && charMeta[s].length) return s;
+      s = FALLBACK[s] || 'idle';
+    }
+    return 'idle';
+  }
+
+  // Frame list for a character/state: signature moves pick frames out of other animations (ANIM_MAP)
+  // New characters without custom atlases fall back to a similar existing character's frames.
+  _spriteFallback(character) {
+    const MAP = {
+      gaara: 'naruto', hinata: 'sakura', neji: 'kakashi',
+      haku: 'sasuke', rock_lee: 'naruto', kisame: 'kakashi'
+    };
+    return MAP[character] || character;
+  }
+  _frames(character, state) {
+    let charMeta = this.metadata[character];
+    if (!charMeta) {
+      const fb = this._spriteFallback(character);
+      charMeta = this.metadata[fb];
+      if (!charMeta) return null;
+    }
+    const map = ANIM_MAP[character] && ANIM_MAP[character][state];
+    if (map) {
+      const out = [];
+      for (const [anim, idx] of map) {
+        const fr = charMeta[anim] && charMeta[anim][idx];
+        if (fr) out.push(fr);
+      }
+      if (out.length) return out;
+    }
+    return charMeta[this._resolveState(charMeta, state)];
+  }
+
+  getFrame(character, state, frameIdx) {
+    const stateFrames = this._frames(character, state);
+    if (!stateFrames || stateFrames.length === 0) return null;
+    const idx = ((frameIdx % stateFrames.length) + stateFrames.length) % stateFrames.length;
+    return stateFrames[idx];
+  }
+
+  getAnimLength(character, state) {
+    const stateFrames = this._frames(character, state);
+    return stateFrames ? stateFrames.length : 1;
+  }
+
+  // Return the atlas Image for a character, falling back for new roster members
+  getAtlas(character) {
+    if (this.atlases[character]) return this.atlases[character];
+    const fb = this._spriteFallback(character);
+    return this.atlases[fb] || this.atlases['naruto'];
+  }
+
+  // Frame of an extra-FX animation (fx2 atlas: rasengan, chidori, fireball, ...)
+  getFx(group, idx) {
+    const g = this.metadata.fx2 && this.metadata.fx2[group];
+    if (!g || !g.length) return null;
+    return g[((idx % g.length) + g.length) % g.length];
+  }
+}
+
+// ============================================================================
+// INPUT MAPPER - keyboard handling with multi-tap chakra detection
+// ============================================================================
+class InputState {
+  constructor() {
+    this.moveX = 0; this.moveY = 0;
+    this.jumpPressed = false; this.jumpHeld = false;
+    this.attackPressed = false; this.attackHeld = false;
+    this.guardHeld = false; this.guardPressed = false;
+    this.chakraHeld = false; this.chakraPressed = false;
+    this.subPressed = false;
+    this.changeLeaderPrev = false; this.changeLeaderNext = false;
+    this.tiltDir = [0, 0]; this.tiltTriggered = false;
+    this.ninjutsu = false; this.chakraDash = false;
+    this.ultimate = false; this.linkedSecret = false;
+    this.grab = false; this.counter = false;
+    this.shuriken = false; this.assist = false;
+  }
+}
+
+class InputMapper {
+  constructor(keymap) {
+    this.keys = keymap;
+    this.state = new InputState();
+    this.pressed = {};  // role -> bool (currently down)
+    this._chakraTaps = [];  // timestamps
+    this._lastJump = false; this._lastAttack = false; this._lastGuard = false; this._lastChakra = false;
+    this._lastLeaderPrev = false; this._lastLeaderNext = false;
+    this._lastShuriken = false; this._lastAssist = false; this._lastSub = false;
+    this.tapped = {};   // role -> pressed at least once since last update (catches taps shorter than a frame)
+    this._lastMoveX = 0; this._lastMoveY = 0;
+    this._dirPressTime = 0;
+    this._lastDirChange = 0;
+    this.DOUBLE_TAP_WINDOW = 220;  // ms
+    this.TRIPLE_TAP_WINDOW = 360;
+    this.TILT_FLICK_WINDOW = 100;
+  }
+
+  keyDown(code) {
+    for (const role in this.keys) {
+      if (this.keys[role] === code) {
+        this.pressed[role] = true;
+        this.tapped[role] = true;
+        return;
+      }
+    }
+  }
+
+  // Release everything (window lost focus -> keyup events never arrive -> stuck keys)
+  releaseAll() {
+    this.pressed = {};
+    this.tapped = {};
+  }
+
+  keyUp(code) {
+    for (const role in this.keys) {
+      if (this.keys[role] === code) {
+        this.pressed[role] = false;
+      }
+    }
+  }
+
+  isDown(role) { return !!this.pressed[role]; }
+
+  update() {
+    const s = this.state;
+    // Reset derived
+    s.tiltTriggered = false; s.tiltDir = [0, 0];
+    s.ninjutsu = false; s.chakraDash = false;
+    s.ultimate = false; s.linkedSecret = false;
+    s.grab = false; s.counter = false;
+    s.shuriken = false; s.assist = false;
+    s.changeLeaderPrev = false; s.changeLeaderNext = false;
+    s.jumpPressed = false; s.attackPressed = false;
+    s.guardPressed = false; s.chakraPressed = false; s.subPressed = false;
+
+    const mx = (this.isDown('right') ? 1 : 0) - (this.isDown('left') ? 1 : 0);
+    const my = (this.isDown('down') ? 1 : 0) - (this.isDown('up') ? 1 : 0);
+    s.moveX = mx; s.moveY = my;
+
+    s.jumpHeld = this.isDown('jump');
+    s.attackHeld = this.isDown('attack');
+    s.guardHeld = this.isDown('guard');
+    s.chakraHeld = this.isDown('chakra');
+
+    const now = performance.now();
+    // A key tapped and released between two frames still counts as a press
+    const tap = (role) => !!this.tapped[role];
+    s.jumpPressed = (s.jumpHeld && !this._lastJump) || (tap('jump') && !s.jumpHeld);
+    s.attackPressed = (s.attackHeld && !this._lastAttack) || (tap('attack') && !s.attackHeld);
+    s.guardPressed = s.guardHeld && !this._lastGuard;
+    s.chakraPressed = (s.chakraHeld && !this._lastChakra) || (tap('chakra') && !s.chakraHeld);
+    // Edge-trigger substitution so holding U doesn't burn every substitution slot in one combo
+    s.subPressed = (this.isDown('sub') && !this._lastSub) || (tap('sub') && !this.isDown('sub'));
+    // Edge-trigger leader swaps so holding the key doesn't cycle through all leaders
+    s.changeLeaderPrev = (this.isDown('leader_prev') && !this._lastLeaderPrev) || (tap('leader_prev') && !this.isDown('leader_prev'));
+    s.changeLeaderNext = (this.isDown('leader_next') && !this._lastLeaderNext) || (tap('leader_next') && !this.isDown('leader_next'));
+    this.tapped = {};
+
+    // Drop stale taps every frame (previously only pruned on a new tap, so an old double-tap
+    // could turn a plain Ninjutsu into an Ultimate seconds later)
+    this._chakraTaps = this._chakraTaps.filter(t => now - t <= this.TRIPLE_TAP_WINDOW);
+    if (s.chakraPressed) this._chakraTaps.push(now);
+
+    // Tilt detection: new direction pressed within flick window
+    const dirChanged = (mx !== this._lastMoveX || my !== this._lastMoveY) && (mx !== 0 || my !== 0);
+    if (dirChanged) this._dirPressTime = now;
+    if (s.attackPressed) {
+      const elapsed = now - this._dirPressTime;
+      if (elapsed <= this.TILT_FLICK_WINDOW && (mx !== 0 || my !== 0)) {
+        s.tiltTriggered = true;
+        s.tiltDir = [mx, my];
+      }
+    }
+
+    // Combined moves
+    if (s.attackPressed && s.chakraHeld && s.guardHeld) {
+      s.counter = true; s.attackPressed = false;
+    } else if (s.attackPressed && s.guardHeld && !s.chakraHeld) {
+      s.grab = true; s.attackPressed = false;
+    } else if (s.attackPressed && s.chakraHeld && this._chakraTaps.length >= 3) {
+      s.linkedSecret = true; s.attackPressed = false; this._chakraTaps = [];
+    } else if (s.attackPressed && s.chakraHeld && this._chakraTaps.length >= 2) {
+      s.ultimate = true; s.attackPressed = false; this._chakraTaps = [];
+    } else if (s.attackPressed && s.chakraHeld) {
+      s.ninjutsu = true; s.attackPressed = false;
+    }
+    if (s.jumpPressed && s.chakraHeld) {
+      s.chakraDash = true; s.jumpPressed = false;
+    }
+    // Shuriken throw (edge-triggered, no chakra needed, just the key)
+    const shurikenDown = this.isDown('shuriken');
+    if (shurikenDown && !this._lastShuriken) {
+      s.shuriken = true;
+    }
+    this._lastShuriken = shurikenDown;
+    // Team assist (edge-triggered)
+    const assistDown = this.isDown('assist');
+    if (assistDown && !this._lastAssist) {
+      s.assist = true;
+    }
+    this._lastAssist = assistDown;
+
+    this._lastJump = s.jumpHeld;
+    this._lastAttack = s.attackHeld;
+    this._lastGuard = s.guardHeld;
+    this._lastChakra = s.chakraHeld;
+    this._lastLeaderPrev = this.isDown('leader_prev');
+    this._lastLeaderNext = this.isDown('leader_next');
+    this._lastSub = this.isDown('sub');
+    this._lastMoveX = mx;
+    this._lastMoveY = my;
+  }
+}
+
+// ============================================================================
+// FIGHTER
+// ============================================================================
+class Fighter {
+  constructor(character, x, y, facing, teamId, assets) {
+    this.character = character;
+    this.teamId = teamId;
+    this.data = CHARS_DATA[character];
+    this.assets = assets;
+    this.x = x; this.y = y;
+    this.vx = 0; this.vy = 0;
+    this.facing = facing;
+    this.onGround = true;
+    this.onWall = false; this.wallSide = 0;
+    this.state = ST.INTRO;
+    this.stateTimer = 0;
+    this.animFrame = 0; this.animTimer = 0;
+    this.chakra = CFG.MAX_CHAKRA;
+    this.chakraLoadHeld = false;
+    this.hitstun = 0;
+    this.invuln = 0;
+    this.blocking = false;
+    this.comboCount = 0;
+    this.comboBranchBuffer = null;
+    this.awakened = false;
+    this.awakenTimer = 0;
+    this.defeated = false;
+    this.cinematicFreeze = 0;
+    this.flipLock = false;
+    this._lastHitTargets = new Set();
+    this.airDashUsed = false;
+    // Guard system
+    this.guard = 100;          // guard gauge; drains on blocked hits, regenerates when not blocking
+    this.guardBreak = 0;       // frames left in which guarding is impossible after a guard break
+    this.perfectWindow = 0;    // frames after tapping Guard in which a hit is a Perfect Block
+    this.perfectFlash = 0;     // visual feedback timer
+    this.blockFlash = 0;
+    this.startX = x;
+    // Signature moves: deferred spawn (fires when stateTimer reaches `at`) and the on-screen move name
+    this.queued = null;
+    this.pendingCallout = null;
+  }
+
+  // Can start a special (ninjutsu / ultimate / dash ...). Unlike canAct() this allows
+  // cancelling out of a basic combo, but NOT re-triggering a special that is already running
+  // (that used to drain chakra and add Storm every press without doing anything).
+  canSpecial() {
+    if (this.defeated || this.cinematicFreeze > 0 || this.hitstun > 0) return false;
+    const locked = [ST.NINJUTSU, ST.ULTIMATE, ST.LINKED, ST.CHAKRA_DASH, ST.SUB,
+                    ST.GRAB, ST.TILT, ST.SHURIKEN, ST.ASSIST,
+                    ST.RASENSHURIKEN, ST.CLONES, ST.RENDAN, ST.FIREBALL, ST.KIRIN, ST.PHOENIX];
+    return !locked.includes(this.state);
+  }
+
+  canAct() {
+    if (this.defeated || this.cinematicFreeze > 0) return false;
+    if (this.hitstun > 0) return false;
+    const busyStates = [ST.ATTACK1, ST.ATTACK2, ST.ATTACK_UP, ST.ATTACK_DN, ST.TILT,
+                        ST.GRAB, ST.NINJUTSU, ST.ULTIMATE, ST.LINKED, ST.AIR_ATK,
+                        ST.CHAKRA_DASH, ST.SUB, ST.SHURIKEN, ST.ASSIST,
+                        ST.RASENSHURIKEN, ST.CLONES, ST.RENDAN, ST.FIREBALL, ST.KIRIN, ST.PHOENIX];
+    if (busyStates.includes(this.state)) return false;
+    return true;
+  }
+
+  setState(newState, resetAnim = true) {
+    if (this.state === newState) return;
+    this.state = newState;
+    this.stateTimer = 0;
+    this.queued = null;   // a deferred signature-move spawn is cancelled when the move is interrupted
+    // A new move can hit again. (The hit list was never cleared, so after the first
+    // hit of the match you could never damage that opponent again.)
+    this._lastHitTargets.clear();
+    // flipLock is only meant to last for grab / ultimate / linked
+    this.flipLock = false;
+    if (resetAnim) { this.animFrame = 0; this.animTimer = 0; }
+  }
+
+  get hurtbox() {
+    return { x: this.x - 40, y: this.y - 140, w: 80, h: 140 };
+  }
+
+  hitbox() {
+    const info = MOVES[this.state];
+    if (!info || info.active === 0) return null;
+    // Shuriken / assist damage comes from the projectile / support fighter, not a melee box
+    if (info.projectile || info.assist) return null;
+    if (!(info.startup <= this.stateTimer && this.stateTimer < info.startup + info.active)) return null;
+    let reach = 100;
+    if ([ST.NINJUTSU, ST.ULTIMATE, ST.LINKED].includes(this.state)) reach = 160;
+    if (this.state === ST.GRAB) reach = 80;
+    if (this.state === ST.SHURIKEN) reach = 50;
+    const hx = this.facing === 1 ? this.x + 10 : this.x - 10 - reach;
+    return { x: hx, y: this.y - 130, w: reach, h: 120 };
+  }
+
+  applyInput(inp, opp, team, enemyTeam) {
+    if (this.defeated || this.cinematicFreeze > 0) return;
+    // Tapping Guard opens a short Perfect Block window
+    if (inp.guardPressed && this.onGround && this.guardBreak === 0) this.perfectWindow = 8;
+    // Substitution interrupts hitstun
+    if (inp.subPressed && team.subs > 0 && this.hitstun > 0) {
+      this._doSubstitution(team, opp);
+      return;
+    }
+    // Counter
+    if (inp.counter && this.chakra >= CFG.COUNTER_COST && this.canAct()) {
+      this.chakra -= CFG.COUNTER_COST;
+      this.setState(ST.TILT);
+      this._tryCounter(opp, enemyTeam);
+      return;
+    }
+    this.chakraLoadHeld = inp.chakraHeld;
+    if (this.hitstun > 0) return;
+
+    const special = this.canSpecial();
+    if (special && inp.linkedSecret && team.storm >= 100 && this.chakra >= 30) {
+      team.storm = 0; this.chakra -= 30;
+      this.comboBranchBuffer = null;
+      this.setState(ST.LINKED); this.flipLock = true; return;
+    }
+    if (special && inp.ultimate && this.chakra >= CFG.ULTIMATE_COST) {
+      this.chakra -= CFG.ULTIMATE_COST;
+      this.comboBranchBuffer = null;
+      this.setState(ST.ULTIMATE); this.flipLock = true; return;
+    }
+    if (special && inp.ninjutsu && this._trySignature(inp, opp, team)) return;
+    if (special && inp.ninjutsu && this.chakra >= CFG.NINJUTSU_COST) {
+      this.chakra -= CFG.NINJUTSU_COST;
+      this.comboBranchBuffer = null;
+      this.setState(ST.NINJUTSU);
+      team.storm = Math.min(100, team.storm + 5);
+      return;
+    }
+    // Shuriken throw - costs chakra, creates a projectile
+    if (inp.shuriken && this.chakra >= CFG.SHURIKEN_COST && this.canAct()) {
+      this.chakra -= CFG.SHURIKEN_COST;
+      this.setState(ST.SHURIKEN);
+      this._throwShuriken(team);
+      return;
+    }
+    // Team assist - costs storm gauge, calls support fighter
+    if (inp.assist && team.storm >= CFG.ASSIST_STORM_COST && this.canAct()) {
+      team.storm -= CFG.ASSIST_STORM_COST;
+      this.setState(ST.ASSIST);
+      this._callAssist(team, opp);
+      return;
+    }
+    if (special && inp.chakraDash && this.chakra >= CFG.CHAKRA_DASH_COST) {
+      this.chakra -= CFG.CHAKRA_DASH_COST;
+      this.comboBranchBuffer = null;
+      this._doChakraDash(opp);
+      team.storm = Math.min(100, team.storm + 2);
+      return;
+    }
+    if (inp.grab && this.canAct()) {
+      this.setState(ST.GRAB); this.flipLock = true; return;
+    }
+    if (inp.chakraHeld && !this.awakened && this.canAct() && this._canAwaken(team)) {
+      this._startAwakening(); return;
+    }
+
+    // Buffer combo branches during attack states
+    if ([ST.ATTACK1, ST.ATTACK2, ST.ATTACK_UP, ST.ATTACK_DN, ST.AIR_ATK].includes(this.state)) {
+      if (inp.attackPressed) {
+        const info = MOVES[this.state];
+        if (info.branch) this.comboBranchBuffer = info.branch;
+      }
+      return;
+    }
+    if (!this.canAct()) return;
+
+    if (!this.flipLock && this.onGround && opp && !opp.defeated) {
+      this.facing = opp.x > this.x ? 1 : -1;
+    }
+
+    this.blocking = inp.guardHeld && this.onGround && this.guardBreak === 0 && this.guard > 0;
+    if (this.blocking) {
+      if (this.state !== ST.BLOCK) this.setState(ST.BLOCK);
+    } else if (this.state === ST.BLOCK) {
+      this.setState(ST.IDLE);
+    }
+
+    if (inp.tiltTriggered && this.onGround) {
+      this.setState(ST.TILT);
+      this.comboBranchBuffer = null;
+      return;
+    }
+
+    if (inp.jumpPressed && this.onGround) {
+      this.vy = CFG.JUMP_VY;
+      this.onGround = false; this.onWall = false;
+      this.airDashUsed = false;
+      this.setState(ST.JUMP);
+    } else if (!this.onGround && inp.jumpPressed && inp.moveX !== 0 && !this.airDashUsed) {
+      // Air dash: second jump press in the air. (Was a plain `if`, so the very same press
+      // that started a jump while holding a direction also fired an air dash.)
+      // One per jump - otherwise infinite i-frame dashing.
+      this.airDashUsed = true;
+      this.vx = CFG.AIR_DASH_VX * inp.moveX;
+      if (this.state !== ST.JUMP) this.state = ST.JUMP;
+      this.invuln = Math.max(this.invuln, 8);
+    }
+
+    if (inp.attackPressed) {
+      if (!this.onGround) {
+        this.setState(ST.AIR_ATK);
+      } else if (inp.moveY < 0) {
+        this.setState(ST.ATTACK_UP);
+      } else if (inp.moveY > 0) {
+        this.setState(ST.ATTACK_DN);
+      } else {
+        this.setState(this.comboCount === 0 ? ST.ATTACK1 : ST.ATTACK2);
+      }
+      return;
+    }
+
+    // Movement
+    if (this.onGround) {
+      if (inp.moveX !== 0) {
+        // Keep facing the opponent while walking (walking backwards used to turn you around,
+        // which also reversed your knockback direction when hit).
+        if (!this.blocking && (!opp || opp.defeated || this.flipLock)) this.facing = inp.moveX;
+        this.vx = inp.moveX * CFG.WALK_SPEED;
+        if (this.awakened) this.vx *= CFG.AWAKEN_SPEED_BOOST;
+        if (![ST.ATTACK1, ST.ATTACK2].includes(this.state) && this.state !== ST.WALK) {
+          this.setState(ST.WALK);
+        }
+      } else {
+        this.vx *= 0.5;
+        if (this.state === ST.WALK) this.setState(ST.IDLE);
+      }
+    } else {
+      if (inp.moveX !== 0) {
+        const nearLeft = this.x <= CFG.LEFT_WALL + 40;
+        const nearRight = this.x >= CFG.RIGHT_WALL - 40;
+        if ((nearLeft && inp.moveX < 0) || (nearRight && inp.moveX > 0)) {
+          this.vx = inp.moveX * 2;
+          this.vy = Math.min(this.vy, CFG.WALL_RUN_VY) - 0.5;
+          this.onWall = true;
+          this.wallSide = nearLeft ? -1 : 1;
+        } else {
+          this.vx += inp.moveX * 0.5;
+          this.vx = Math.max(-CFG.RUN_SPEED, Math.min(CFG.RUN_SPEED, this.vx));
+        }
+      }
+    }
+  }
+
+  // ---------- SIGNATURE MOVES (Naruto / Sasuke) ----------
+  // Ninjutsu input + Up / Down (or Down in the air) picks the character's signature move.
+  _trySignature(inp, opp, team) {
+    const map = SIGNATURES[this.character];
+    if (!map) return false;
+    let key = null;
+    if (!this.onGround) { if (inp.moveY > 0) key = map.air; }
+    else if (inp.moveY < 0) key = map.up;
+    else if (inp.moveY > 0) key = map.down;
+    if (!key) return false;
+    const info = MOVES[key];
+    if (this.chakra < info.cost) return false;   // too little chakra -> falls back to the plain Ninjutsu
+    this.chakra -= info.cost;
+    this.comboBranchBuffer = null;
+    this.setState(key);
+    team.storm = Math.min(100, team.storm + 5);
+    this.pendingCallout = { text: SIG_NAMES[key], color: this.data.color };
+    this['_sig_' + key](opp, team);
+    return true;
+  }
+
+  _spawnProj(team, o) {
+    if (!team.projectiles) team.projectiles = [];
+    team.projectiles.push(Object.assign({
+      owner: this, kind: 'shuriken', x: this.x, y: this.y - 90, vx: 0, vy: 0, grav: 0,
+      damage: CFG.SHURIKEN_DAMAGE, kb: 3, hs: 12, launch: false, hitR: 0, radius: 12,
+      lifetime: 90, facing: this.facing, spin: 0, age: 0, hit: false, hitTargets: new Set(),
+      anim: null, hitAnim: null, scale: 1, hold: 0, color: this.data.color,
+    }, o));
+  }
+
+  // Naruto: Rasenshuriken - orb is held during the wind-up (BattleScene releases it), huge launcher
+  _sig_rasenshuriken(opp, team) {
+    this._spawnProj(team, { kind: 'rasenshuriken', anim: 'rasenshuriken', scale: 0.55,
+      hold: MOVES.rasenshuriken.startup, speed: 7.5, x: this.x + this.facing * 50, y: this.y - 120,
+      damage: 120, kb: 18, hs: 55, launch: true, hitR: 44, lifetime: 160, color: '#8fdcff' });
+  }
+
+  // Naruto: Shadow Clone Barrage - three clones rush in one after another, the last one launches
+  _sig_clone_barrage(opp, team) {
+    this.queued = { at: MOVES.clone_barrage.startup, fn: (o, t, e) => {
+      if (!t.fields) t.fields = [];
+      for (let i = 0; i < 3; i++) {
+        t.fields.push({ type: 'clone', character: this.character, owner: this, i,
+          x: this.x + this.facing * (30 + i * 26), y: CFG.FLOOR_Y, facing: this.facing,
+          timer: 0, delay: i * 8, struck: false, strikeT: 0,
+          damage: i === 2 ? 34 : 20, kb: i === 2 ? 12 : 6, hs: i === 2 ? 40 : 18, launch: i === 2 });
+      }
+      e.spawnSmoke(this.x + this.facing * 60, this.y - 70, 12);
+    } };
+  }
+
+  // Naruto (air): Uzumaki Barrage - diving multi-hit kick
+  _sig_rendan(opp, team) {
+    this.vx = this.facing * 8;
+    this.vy = 8;
+    this.onGround = false;
+  }
+
+  // Sasuke: Great Fireball Jutsu
+  _sig_fireball(opp, team) {
+    this.queued = { at: MOVES.fireball.startup, fn: (o, t, e) => {
+      this._spawnProj(t, { kind: 'fireball', anim: 'fireball', hitAnim: 'fireball_hit', scale: 0.9,
+        x: this.x + this.facing * 70, y: this.y - 105, vx: this.facing * 9,
+        damage: 75, kb: 15, hs: 36, hitR: 34, lifetime: 110, color: '#ff8c28' });
+      e.spawnBurst(this.x + this.facing * 60, this.y - 105, '#ff9a30', 14, 5, 18, 3, -0.02);
+      e.shakeScreen(3);
+    } };
+  }
+
+  // Sasuke: Kirin - lightning strike on the opponent's position (telegraphed, can be dodged)
+  _sig_kirin(opp, team) {
+    if (!team.fields) team.fields = [];
+    team.fields.push({ type: 'bolt', owner: this, timer: 0, lockAt: 24, strikeAt: 38, struck: false, struckAt: 0,
+      x: opp ? opp.x : this.x + this.facing * 300, damage: 110 });
+  }
+
+  // Sasuke (air): Phoenix Flower - three small fireballs thrown in a spread
+  _sig_phoenix(opp, team) {
+    this.queued = { at: MOVES.phoenix.startup, fn: (o, t, e) => {
+      const vxs = [11, 9.5, 8], vys = [1.5, 4.5, 7.5];
+      for (let i = 0; i < 3; i++) {
+        this._spawnProj(t, { kind: 'phoenix', anim: 'fireball', hitAnim: 'fireball_hit', scale: 0.4, small: true,
+          x: this.x + this.facing * 50, y: this.y - 90, vx: this.facing * vxs[i], vy: vys[i], grav: 0.12,
+          damage: 26, kb: 9, hs: 22, hitR: 16, lifetime: 90, color: '#ff8c28' });
+      }
+      e.spawnBurst(this.x + this.facing * 50, this.y - 90, '#ff9a30', 10, 4, 16, 3, -0.02);
+    } };
+  }
+
+  _doChakraDash(opp) {
+    let dx;
+    if (opp && !opp.defeated) dx = opp.x - this.x;
+    else dx = this.facing * 600;
+    const sign = dx >= 0 ? 1 : -1;
+    this.facing = sign;
+    this.vx = sign * 22;
+    if (!this.onGround && opp) {
+      const dy = opp.y - this.y;
+      this.vy = Math.max(-12, Math.min(12, dy * 0.2));
+    }
+    this.setState(ST.CHAKRA_DASH);
+    this.invuln = Math.max(this.invuln, 4);
+  }
+
+  _throwShuriken(team) {
+    // Create a projectile entity stored on the team for the battle scene to process
+    this._spawnProj(team, {
+      x: this.x + this.facing * 40, y: this.y - 90,
+      vx: this.facing * CFG.SHURIKEN_SPEED, damage: CFG.SHURIKEN_DAMAGE, lifetime: 90, radius: 12,
+    });
+  }
+
+  _callAssist(team, opp) {
+    // Call a support fighter to appear and attack
+    if (!team.assists) team.assists = [];
+    // Pick a support fighter (not the current leader)
+    const supportIdx = (team.leaderIndex + 1) % team.fighters.length;
+    const support = team.fighters[supportIdx];
+    let ax = this.x + this.facing * 120;
+    if (opp && !opp.defeated) {
+      // Appear behind the opponent
+      ax = opp.x - opp.facing * 80;
+    }
+    team.assists.push({
+      character: support.character,
+      x: ax,
+      y: CFG.FLOOR_Y,
+      facing: opp ? (opp.x > ax ? 1 : -1) : this.facing,
+      timer: 0,
+      maxTimer: 30,
+      attacked: false,
+      owner: this,
+      hitTargets: new Set(),
+    });
+  }
+
+  _doSubstitution(team, opp) {
+    team.subs -= 1;
+    team.subRegenTimers.push(0);
+    if (opp && !opp.defeated) {
+      // Appear behind the opponent and face them (they face away from us, so we face the way they face)
+      this.x = opp.x - opp.facing * 70;
+      this.facing = opp.facing;
+    } else {
+      this.x += -this.facing * 100;
+    }
+    if (opp) this.y = opp.y;
+    this.vx = 0; this.vy = 0;
+    if (opp && opp.onGround) this.onGround = true;
+    this.hitstun = 0;
+    this.invuln = CFG.SUB_I_FRAMES;
+    this.setState(ST.SUB);
+  }
+
+  _tryCounter(opp, enemyTeam) {
+    if (!opp || opp.defeated) return;
+    if (Math.abs(opp.x - this.x) < 120) {
+      const atkStates = [ST.ATTACK1, ST.ATTACK2, ST.ATTACK_UP, ST.ATTACK_DN, ST.AIR_ATK, ST.TILT, ST.GRAB, ST.NINJUTSU];
+      if (atkStates.includes(opp.state)) {
+        opp.chakra = Math.max(0, opp.chakra - 30);
+        opp.hitstun = CFG.HITSTUN_HEAVY;
+        opp.setState(ST.HIT);
+        opp.vx = -opp.facing * 6;
+        opp.comboCount = 0;
+        enemyTeam.damage(CFG.DMG_COUNTER);
+      }
+    }
+  }
+
+  _canAwaken(team) {
+    if (this.awakened) return false;
+    if (team.health / team.maxHealth <= CFG.AWAKEN_HEALTH_THRESHOLD) return true;
+    if (team.storm >= 100) return true;
+    return false;
+  }
+
+  _startAwakening() {
+    this.awakened = true;
+    this.awakenTimer = CFG.AWAKEN_DURATION;
+    this.invuln = Math.max(this.invuln, 30);
+    this.chakra = CFG.MAX_CHAKRA;
+  }
+
+  update(opp, team, effects) {
+    if (this.defeated) {
+      // Knocked-out fighter: keep animating and let them fall to the floor instead of freezing mid-air
+      this.state = ST.DEFEATED;
+      this.hitstun = 0;
+      this.animTimer++;
+      if (this.animTimer >= Math.max(1, Math.floor(60 / (ANIM_FPS.defeated || 4)))) {
+        this.animTimer = 0;
+        const len = this.assets.getAnimLength(this.character, ST.DEFEATED);
+        if (this.animFrame < len - 1) this.animFrame++;
+      }
+      this.vy += CFG.GRAVITY;
+      this.x += this.vx; this.y += this.vy;
+      this.vx *= 0.9;
+      this.x = Math.max(CFG.LEFT_WALL + 30, Math.min(CFG.RIGHT_WALL - 30, this.x));
+      if (this.y >= CFG.FLOOR_Y) { this.y = CFG.FLOOR_Y; this.vy = 0; this.onGround = true; }
+      return;
+    }
+    if (this.cinematicFreeze > 0) { this.cinematicFreeze--; return; }
+
+    if (this.invuln > 0) this.invuln--;
+    if (this.perfectWindow > 0) this.perfectWindow--;
+    if (this.perfectFlash > 0) this.perfectFlash--;
+    if (this.blockFlash > 0) this.blockFlash--;
+    if (this.guardBreak > 0) this.guardBreak--;
+    if (this.hitstun > 0) {
+      this.hitstun--;
+      if (this.state !== ST.HIT) this.setState(ST.HIT);
+      if (this.hitstun === 0) {
+        this.comboCount = 0;
+        this.setState(this.onGround ? ST.IDLE : ST.FALL);
+      }
+    }
+
+    if (this.awakened) {
+      this.awakenTimer--;
+      if (this.awakenTimer <= 0) this.awakened = false;
+      else if (Math.random() < 0.5) effects.spawnAwakenAura(this.x, this.y - 80, this.data.color);
+    }
+
+    if (this.chakraLoadHeld && this.canAct() && !this.blocking) {
+      const rate = CFG.CHAKRA_LOAD_RATE * (this.awakened ? CFG.AWAKEN_CHAKRA_BOOST : 1);
+      this.chakra = Math.min(CFG.MAX_CHAKRA, this.chakra + rate);
+    } else {
+      const regen = CFG.CHAKRA_REGEN * (this.awakened ? CFG.AWAKEN_CHAKRA_BOOST : 1);
+      this.chakra = Math.min(CFG.MAX_CHAKRA, this.chakra + regen);
+    }
+
+    this.stateTimer++;
+    this.animTimer++;
+    // Deferred spawn of a signature move (cancelled by setState when the fighter is hit)
+    if (this.queued && this.stateTimer >= this.queued.at) {
+      const q = this.queued; this.queued = null;
+      q.fn(opp, team, effects);
+    }
+    // Multi-hit moves (Uzumaki Barrage) re-open their hitbox every few frames
+    const mv = MOVES[this.state];
+    if (mv && mv.multi && this.stateTimer > mv.startup && (this.stateTimer - mv.startup) % mv.multi === 0) {
+      this._lastHitTargets.clear();
+    }
+    const fps = ANIM_FPS[this.state] || 10;
+    if (this.animTimer >= Math.max(1, Math.floor(60 / fps))) {
+      this.animTimer = 0;
+      const animLen = this.assets.getAnimLength(this.character, this.state);
+      // Looping states: idle, walk, jump, fall, block, hit, defeated, intro
+      // Action states: attack1, attack2, attack_up, attack_dn, air_atk, tilt, grab,
+      //   ninjutsu, ultimate, linked, chakra_dash, sub — play once, hold last frame
+      const loopingStates = [ST.IDLE, ST.WALK, ST.JUMP, ST.FALL, ST.BLOCK, ST.HIT, ST.DEFEATED, ST.INTRO];
+      if (loopingStates.includes(this.state)) {
+        this.animFrame = (this.animFrame + 1) % Math.max(1, animLen);
+      } else if (this.animFrame < animLen - 1) {
+        this.animFrame++;
+      }
+      // else: hold on last frame for action states
+    }
+
+    const info = MOVES[this.state];
+    if (info) {
+      const total = info.startup + info.active + info.recovery;
+      if (this.comboBranchBuffer && this.stateTimer >= info.startup + info.active) {
+        if (this.stateTimer >= total - 4) {
+          const nxt = this.comboBranchBuffer;
+          this.comboBranchBuffer = null;
+          this.comboCount++;
+          if (nxt === ST.ATTACK2 && this.comboCount >= 2) this.comboCount = 0;
+          this.setState(nxt);
+          return;
+        }
+      }
+      if (this.stateTimer >= total) {
+        if ([ST.ATTACK1, ST.ATTACK2, ST.ATTACK_UP, ST.ATTACK_DN, ST.AIR_ATK].includes(this.state)) {
+          this.comboCount = 0;
+        }
+        if ([ST.ULTIMATE, ST.LINKED].includes(this.state)) {
+          this.invuln = Math.max(this.invuln, 12);
+        }
+        // The chakra dash's slow-down was in a branch that could never run (the move ends at 8
+        // frames, the check was for 14), so an air dash kept flying at 22px/frame forever.
+        if (this.state === ST.CHAKRA_DASH) this.vx *= 0.3;
+        this.setState(this.onGround ? ST.IDLE : ST.FALL);
+      }
+    }
+
+    if (this.state === ST.SUB && this.stateTimer >= 12) {
+      this.setState(this.onGround ? ST.IDLE : ST.FALL);
+    }
+    if (this.state === ST.BLOCK && !this.blocking) {
+      this.setState(ST.IDLE);
+    }
+    // Guard only exists while in the block / blockstun states. (It used to stay "on" during
+    // whole ninjutsu / ultimate animations if you started one out of a guard.)
+    if (this.state !== ST.BLOCK && this.state !== ST.HIT) this.blocking = false;
+    // Guard gauge: refills when not guarding (slowly while guarding), and recovers fully from a break
+    if (this.guardBreak === 0) {
+      this.guard = Math.min(100, this.guard + (this.blocking ? 0.1 : 0.5));
+    }
+
+    // Air momentum: air dashes used to carry at 14px/frame all the way to the wall
+    if (!this.onGround && this.hitstun === 0 && Math.abs(this.vx) > CFG.RUN_SPEED) {
+      this.vx *= 0.9;
+    }
+
+    // Physics
+    this.onWall = false;
+    if (!this.onGround) {
+      if (this.x <= CFG.LEFT_WALL + 20) { this.onWall = true; this.wallSide = -1; }
+      else if (this.x >= CFG.RIGHT_WALL - 20) { this.onWall = true; this.wallSide = 1; }
+    }
+    if (this.onWall && this.vy > 0) this.vy = Math.min(this.vy, CFG.WALL_SLIDE_VY);
+    if (!this.onWall) this.vy += CFG.GRAVITY;
+    else this.vy += CFG.GRAVITY * 0.5;
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    if (this.x < CFG.LEFT_WALL + 30) {
+      this.x = CFG.LEFT_WALL + 30;
+      this.vx = 0;
+      if (!this.onGround) { this.onWall = true; this.wallSide = -1; }
+    } else if (this.x > CFG.RIGHT_WALL - 30) {
+      this.x = CFG.RIGHT_WALL - 30;
+      this.vx = 0;
+      if (!this.onGround) { this.onWall = true; this.wallSide = 1; }
+    }
+
+    if (this.y >= CFG.FLOOR_Y) {
+      this.y = CFG.FLOOR_Y;
+      this.vy = 0;
+      if (!this.onGround) {
+        effects.spawnDust(this.x, this.y, 10);
+        effects.shakeScreen(2);
+      }
+      this.onGround = true;
+      this.onWall = false;
+      if ([ST.JUMP, ST.FALL, ST.AIR_ATK, ST.CHAKRA_DASH, ST.RENDAN].includes(this.state)) {
+        this.setState(ST.IDLE);
+      }
+    } else {
+      this.onGround = false;
+      if (this.vy > 0 && this.state === ST.JUMP) {
+        this.state = ST.FALL;
+        this.animFrame = 0; this.animTimer = 0;
+      }
+    }
+
+    if (this.y < CFG.CEILING_Y + 30) {
+      this.y = CFG.CEILING_Y + 30;
+      if (this.vy < 0) this.vy = 0;
+    }
+
+    if (this.onGround && ![ST.WALK, ST.ATTACK1, ST.ATTACK2].includes(this.state)) {
+      this.vx *= 0.7;
+      if (Math.abs(this.vx) < 0.1) this.vx = 0;
+    }
+
+    if (this.hitstun === 0 && this.state === ST.HIT && this.onGround) {
+      this.setState(ST.IDLE);
+    }
+  }
+
+  takeHit(attacker, info, damage, knockback, hitstun, team, effects, opts = {}) {
+    if (this.defeated) return false;
+    if (this.invuln > 0) return false;
+    const { launch = false, slam = false, grab = false, ignoreBlock = false } = opts;
+    // Push away from the attacker (not "opposite of my facing", which is wrong whenever
+    // the defender isn't facing the attacker, e.g. after a substitution or a cross-up)
+    const awayDir = this.x >= attacker.x ? 1 : -1;
+    // Hit spark position on the side the attack came from
+    const towardAtk = -awayDir;
+
+    // Directional blocking: melee attacks from behind (cross-ups after a substitution / swap)
+    // cannot be blocked. Projectiles and assists are always blockable.
+    const frontal = !opts.melee || ((attacker.x - this.x) * this.facing >= 0);
+    if (!ignoreBlock && !grab && frontal && this.blocking && this.onGround) {
+      // PERFECT BLOCK: Guard tapped just before the hit -> no damage, no guard drain,
+      // the melee attacker is staggered and the defender gains chakra + Storm.
+      if (this.perfectWindow > 0) {
+        this.perfectWindow = 0;
+        this.perfectFlash = 20;
+        this.vx = awayDir * knockback * 0.15;
+        this.chakra = Math.min(CFG.MAX_CHAKRA, this.chakra + 12);
+        team.gainStorm(3);
+        if (opts.melee && attacker.state !== ST.ULTIMATE && attacker.state !== ST.LINKED) {
+          attacker.hitstun = Math.max(attacker.hitstun, 22);
+          attacker.comboBranchBuffer = null;
+          attacker.setState(ST.HIT);
+        }
+        effects.spawnBurst(this.x + towardAtk * 30, this.y - 80, '#ffe680', 18, 8, 22, 4, 0.05);
+        effects.whiteFlash(0.25);
+        effects.shakeScreen(3);
+        return false;
+      }
+      const chip = Math.max(1, Math.floor(damage / 8));
+      team.damage(chip);
+      this.vx = awayDir * knockback * 0.4;
+      this.hitstun = Math.max(this.hitstun, Math.floor(hitstun / 3));
+      this.blockFlash = 10;
+      effects.spawnBlockSpark(this.x + towardAtk * 30, this.y - 80);
+      // Guard gauge drain. Empty gauge (or a massive hit) = GUARD BREAK.
+      this.guard -= damage * 0.6;
+      if (this.guard <= 0 || damage >= CFG.DMG_ULTIMATE) {
+        this.guard = 0;
+        this.guardBreak = 120;        // can't guard for 2s
+        this.blocking = false;
+        this.hitstun = Math.max(this.hitstun, 50);
+        this.vx = awayDir * 8;
+        this.setState(ST.HIT);
+        effects.spawnBurst(this.x, this.y - 80, '#ff6060', 26, 9, 30, 4, 0.15);
+        effects.shakeScreen(8);
+        effects.whiteFlash(0.3);
+      }
+      return false;
+    }
+
+    const dmg = Math.floor(damage * (attacker.awakened ? CFG.AWAKEN_DAMAGE_BOOST : 1.0));
+    team.damage(dmg);
+    this.hitstun = Math.max(this.hitstun, hitstun);
+    this.comboCount = 0;
+    this.comboBranchBuffer = null;   // a buffered combo follow-up must not survive being hit
+    this.blocking = false;           // a hit that gets through (e.g. a grab) breaks the guard
+    if (launch) { this.vy = -14; this.onGround = false; }
+    if (slam) { this.vy = 16; this.onGround = false; }
+    this.vx = awayDir * knockback;
+    this.setState(ST.HIT);
+    const hx = this.x + towardAtk * 20;
+    const hy = this.y - 80;
+    effects.spawnHitSpark(hx, hy, attacker.data.color);
+    effects.shakeScreen(Math.min(8, Math.floor(damage / 8)));
+    if (damage >= CFG.DMG_ULTIMATE) effects.whiteFlash(0.5);
+    return true;
+  }
+
+  draw(ctx, effects) {
+    const frame = this.assets.getFrame(this.character, this.state, this.animFrame);
+    if (!frame) return;
+    const atlas = this.assets.getAtlas(this.character);
+    if (!atlas) return;
+
+    // Use foot_y and center_x for proper anchoring: the character's feet
+    // are at this.y and the body center is at this.x, regardless of how
+    // the sprite rectangle is padded.
+    const footY = frame.foot_y != null ? frame.foot_y : frame.src_h;
+    const centerX = frame.center_x != null ? frame.center_x : frame.src_w / 2;
+
+    ctx.save();
+    if (this.facing === -1) {
+      // Flip horizontally around this.x
+      ctx.translate(this.x, 0);
+      ctx.scale(-1, 1);
+      ctx.translate(-this.x, 0);
+    }
+    // Anchor: center_x maps to this.x, foot_y maps to this.y
+    const dx = this.x - centerX;
+    const dy = this.y - footY;
+    ctx.drawImage(atlas, frame.src_x, frame.src_y, frame.src_w, frame.src_h, dx, dy, frame.src_w, frame.src_h);
+    ctx.restore();
+
+    // Rasengan / Chidori orb in the hand during the plain Ninjutsu (frames from the fx2 atlas)
+    const orb = HAND_ORBS[this.character];
+    if (orb && this.state === ST.NINJUTSU && this.stateTimer < MOVES.ninjutsu.startup + MOVES.ninjutsu.active + 6) {
+      const fr = this.assets.getFx(orb.anim, Math.floor(this.stateTimer / 2));
+      const fx2 = this.assets.atlases.fx2;
+      if (fr && fx2) {
+        const w = fr.src_w * orb.scale, h = fr.src_h * orb.scale;
+        const ox = this.x + this.facing * orb.dx, oy = this.y - orb.dy;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, this.stateTimer / 6);
+        ctx.drawImage(fx2, fr.src_x, fr.src_y, fr.src_w, fr.src_h, ox - w / 2, oy - h / 2, w, h);
+        ctx.restore();
+      }
+    }
+
+    // Guard shield (translucent arc in front of a blocking fighter), gold ring on Perfect Block
+    if (this.blocking || this.blockFlash > 0 || this.perfectFlash > 0) {
+      ctx.save();
+      const cx = this.x + this.facing * 34, cy = this.y - 80;
+      const lowGuard = this.guard < 30;
+      ctx.globalAlpha = (this.perfectFlash > 0 ? 0.35 + this.perfectFlash / 40 : (this.blockFlash > 0 ? 0.55 : 0.22));
+      ctx.fillStyle = this.perfectFlash > 0 ? '#ffe680' : (lowGuard ? '#ff8080' : '#8cdcff');
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 34, 66, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.8;
+      ctx.strokeStyle = this.perfectFlash > 0 ? '#fff6c0' : '#d8f0ff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (this.guardBreak > 0 && Math.floor(this.guardBreak / 6) % 2 === 0) {
+      ctx.save();
+      ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#ff6060';
+      ctx.fillText('GUARD BREAK', this.x, this.y - 160);
+      ctx.restore();
+    }
+
+    // Awakened aura ring
+    if (this.awakened) {
+      const r = 60 + Math.floor(10 * Math.sin(performance.now() * 0.01));
+      ctx.save();
+      ctx.strokeStyle = this.data.color;
+      ctx.globalAlpha = 0.4;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y - 90, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+}
+
+// ============================================================================
+// TEAM
+// ============================================================================
+class Team {
+  constructor(teamId, characterList, startX, facing, assets) {
+    this.teamId = teamId;
+    this.characterList = characterList;
+    this.fighters = characterList.map(c => new Fighter(c, startX, CFG.FLOOR_Y, facing, teamId, assets));
+    this.leaderIndex = 0;
+    this.maxHealth = CFG.MAX_HEALTH;
+    this.health = CFG.MAX_HEALTH;
+    this._displayedHealth = CFG.MAX_HEALTH;
+    this.storm = 0;
+    this._displayedStorm = 0;
+    this.subs = CFG.MAX_SUBSTITUTION;
+    this.subRegenTimers = [];
+    this.swapFlashTimer = 0;
+    this.projectiles = []; // Shuriken projectiles thrown by team members
+    this.assists = [];     // Support fighter assist calls
+    this.fields = [];      // Signature-move entities: shadow clones, Kirin bolts
+    this.swapCooldown = 0; // frames until the leader can be changed again
+  }
+
+  get leader() { return this.fighters[this.leaderIndex]; }
+
+  swapLeader(direction, oppTeam) {
+    if (this.fighters.length <= 1) return false;
+    // Without a cooldown, tapping Q/E repeatedly filled the whole Storm gauge for free
+    if (this.swapCooldown > 0) return false;
+    const old = this.leader;
+    const newIdx = (this.leaderIndex + direction + this.fighters.length) % this.fighters.length;
+    if (newIdx === this.leaderIndex) return false;
+    const newLeader = this.fighters[newIdx];
+    newLeader.x = old.x; newLeader.y = old.y;
+    newLeader.vx = 0; newLeader.vy = 0;
+    newLeader.onGround = old.onGround; newLeader.onWall = old.onWall;
+    newLeader.facing = old.facing;
+    newLeader.setState(ST.IDLE);
+    newLeader.comboCount = 0; newLeader.hitstun = 0; newLeader.invuln = 18;
+    newLeader.comboBranchBuffer = null; newLeader.blocking = false; newLeader.flipLock = false;
+    newLeader.cinematicFreeze = 0; newLeader.airDashUsed = false;
+    newLeader.chakra = Math.max(newLeader.chakra, 30);
+    old.x = -200; old.y = CFG.FLOOR_Y; old.vx = 0; old.vy = 0;
+    old.hitstun = 0; old.comboBranchBuffer = null;
+    this.leaderIndex = newIdx;
+    this.storm = Math.min(100, this.storm + CFG.STORM_PER_SWITCH);
+    this.swapFlashTimer = 12;
+    this.swapCooldown = 90;
+    return true;
+  }
+
+  damage(amount) {
+    this.health = Math.max(0, this.health - amount);
+    this.storm = Math.min(100, this.storm + CFG.STORM_PER_HIT);
+  }
+
+  gainStorm(amount) { this.storm = Math.min(100, this.storm + amount); }
+
+  updateSubs(dt) {
+    if (this.subRegenTimers.length === 0) return;
+    this.subRegenTimers = this.subRegenTimers.map(t => t + dt);
+    const ready = this.subRegenTimers.filter(t => t >= 4.0);
+    if (ready.length > 0) {
+      for (let i = 0; i < ready.length; i++) {
+        if (this.subs < CFG.MAX_SUBSTITUTION) this.subs++;
+      }
+      this.subRegenTimers = this.subRegenTimers.filter(t => t < 4.0);
+    }
+  }
+
+  updateDisplayed() {
+    if (this._displayedHealth > this.health) {
+      this._displayedHealth = Math.max(this.health, this._displayedHealth - 4);
+    } else {
+      this._displayedHealth = this.health;
+    }
+    if (Math.abs(this._displayedStorm - this.storm) > 0.5) {
+      this._displayedStorm += (this.storm - this._displayedStorm) * 0.2;
+    } else {
+      this._displayedStorm = this.storm;
+    }
+  }
+
+  isDefeated() { return this.health <= 0; }
+}
+
+// ============================================================================
+// EFFECTS
+// ============================================================================
+class EffectManager {
+  constructor() {
+    this.particles = [];
+    this.sprites = [];
+    this.texts = [];   // floating move-name callouts
+    this.shake = 0;
+    this.flash = 0;
+    this.cinematic = false;
+    this.cinematicTimer = 0;
+    this.cinematicMax = 0;
+    this.cinematicText = '';
+    this.cinematicColor = '#ffdc50';
+  }
+
+  spawnBurst(x, y, color, count = 14, speed = 6, life = 24, size = 3, gravity = 0.1) {
+    for (let i = 0; i < count; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = speed * (0.3 + Math.random() * 0.7);
+      this.particles.push({
+        x, y,
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+        life: Math.floor(life * (0.7 + Math.random() * 0.5)),
+        maxLife: life, color, size, gravity,
+      });
+    }
+  }
+
+  spawnHitSpark(x, y, color = '#ffdc50') {
+    this.spawnBurst(x, y, color, 22, 10, 28, 5, 0.15);
+    this.spawnBurst(x, y, '#ffffff', 8, 12, 16, 3, 0.1);
+    // Add a brief flash particle at the impact point
+    this.particles.push({
+      x, y, vx: 0, vy: 0, life: 8, maxLife: 8,
+      color: '#ffffff', size: 20, gravity: 0,
+    });
+  }
+
+  spawnBlockSpark(x, y) {
+    this.spawnBurst(x, y, '#b4dcff', 10, 5, 18, 2, 0.1);
+  }
+
+  spawnSmoke(x, y, count = 10) {
+    for (let i = 0; i < count; i++) {
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 24,
+        y: y + (Math.random() - 0.5) * 16,
+        vx: (Math.random() - 0.5) * 4,
+        vy: -Math.random() * 3 - 0.5,
+        life: 28 + Math.floor(Math.random() * 16),
+        maxLife: 44, color: '#b4b4be', size: 6 + Math.floor(Math.random() * 5),
+        gravity: -0.05,
+      });
+    }
+  }
+
+  spawnDust(x, y, count = 8) {
+    for (let i = 0; i < count; i++) {
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 16,
+        y: y,
+        vx: (Math.random() - 0.5) * 6,
+        vy: -Math.random() * 3 - 1,
+        life: 18 + Math.floor(Math.random() * 10),
+        maxLife: 28, color: '#c8b496', size: 3 + Math.floor(Math.random() * 4),
+        gravity: 0.2,
+      });
+    }
+  }
+
+  spawnAwakenAura(x, y, color) {
+    for (let i = 0; i < 2; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const r = 20 + Math.random() * 30;
+      this.particles.push({
+        x: x + Math.cos(ang) * r,
+        y: y + Math.sin(ang) * r * 0.6 + 30,
+        vx: -Math.cos(ang),
+        vy: -Math.sin(ang) * 1.5 - 1,
+        life: 20 + Math.floor(Math.random() * 10),
+        maxLife: 30, color, size: 3 + Math.floor(Math.random() * 3),
+        gravity: -0.02,
+      });
+    }
+  }
+
+  // atlasName: which atlas the frames come from ('fx' or 'fx2'); scale: number or [sx, sy]
+  addSpriteEffect(surfaces, x, y, fps = 24, anchor = 'center', atlasName = 'fx', scale = 1) {
+    this.sprites.push({
+      surfaces, x, y, frame: 0, timer: 0, fps, anchor, atlasName, scale,
+    });
+  }
+
+  addText(x, y, text, color = '#ffffff', life = 56) {
+    this.texts.push({ x, y, text, color, life, maxLife: life });
+  }
+
+  shakeScreen(amount) { this.shake = Math.max(this.shake, amount); }
+  whiteFlash(amount = 0.6) { this.flash = Math.max(this.flash, amount); }
+
+  triggerCinematic(text, duration = 120, color = '#ffdc50') {
+    this.cinematic = true;
+    this.cinematicTimer = duration;
+    this.cinematicMax = duration;
+    this.cinematicText = text;
+    this.cinematicColor = color;
+  }
+
+  update() {
+    for (const p of this.particles) {
+      p.x += p.vx; p.y += p.vy;
+      p.vy += p.gravity;
+      p.vx *= 0.96; p.vy *= 0.96;
+      p.life--;
+    }
+    this.particles = this.particles.filter(p => p.life > 0);
+    for (const t of this.texts) { t.life--; t.y -= 0.5; }
+    this.texts = this.texts.filter(t => t.life > 0);
+
+    this.sprites = this.sprites.filter(sp => {
+      sp.timer++;
+      const frameLen = Math.max(1, Math.floor(60 / sp.fps));
+      if (sp.timer >= frameLen) {
+        sp.timer = 0;
+        sp.frame++;
+        if (sp.frame >= sp.surfaces.length) return false;
+      }
+      return true;
+    });
+
+    this.shake *= 0.85;
+    if (this.shake < 0.1) this.shake = 0;
+    this.flash *= 0.85;
+    if (this.flash < 0.02) this.flash = 0;
+    if (this.cinematic) {
+      this.cinematicTimer--;
+      if (this.cinematicTimer <= 0) this.cinematic = false;
+    }
+  }
+
+  drawParticles(ctx) {
+    for (const p of this.particles) {
+      const alpha = p.life / p.maxLife;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Move-name callouts
+    for (const t of this.texts) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, t.life / (t.maxLife * 0.4));
+      ctx.font = 'bold 24px "Trebuchet MS", Arial';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 5; ctx.strokeStyle = '#000';
+      ctx.strokeText(t.text, t.x, t.y);
+      ctx.fillStyle = t.color;
+      ctx.fillText(t.text, t.x, t.y);
+      ctx.restore();
+    }
+  }
+
+  drawSprites(ctx, assets) {
+    for (const sp of this.sprites) {
+      if (sp.frame >= sp.surfaces.length) continue;
+      const meta = sp.surfaces[sp.frame];
+      const atlas = assets.atlases[sp.atlasName || 'fx'];
+      if (!atlas) continue;
+      const sx = Array.isArray(sp.scale) ? sp.scale[0] : (sp.scale || 1);
+      const sy = Array.isArray(sp.scale) ? sp.scale[1] : (sp.scale || 1);
+      const w = meta.src_w * sx, h = meta.src_h * sy;
+      let dx, dy;
+      if (sp.anchor === 'center') {
+        dx = sp.x - w / 2;
+        dy = sp.y - h / 2;
+      } else {
+        dx = sp.x; dy = sp.y;
+      }
+      ctx.drawImage(atlas, meta.src_x, meta.src_y, meta.src_w, meta.src_h, dx, dy, w, h);
+    }
+  }
+
+  drawOverlay(ctx) {
+    if (this.cinematic) {
+      const barH = 110;
+      const progress = 1 - this.cinematicTimer / this.cinematicMax;
+      const ease = Math.min(1, progress * 4);
+      const curH = Math.floor(barH * ease);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, CFG.SCREEN_W, curH);
+      ctx.fillRect(0, CFG.SCREEN_H - curH, CFG.SCREEN_W, curH);
+      if (ease >= 1 && this.cinematicTimer > 10) {
+        ctx.save();
+        ctx.font = 'bold 56px "Trebuchet MS", Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const lines = this.cinematicText.split('\n');
+        const yStart = CFG.SCREEN_H / 2 - (lines.length - 1) * 32;
+        lines.forEach((line, i) => {
+          ctx.fillStyle = '#000';
+          ctx.fillText(line, CFG.SCREEN_W / 2 + 3, yStart + i * 64 + 3);
+          ctx.fillStyle = this.cinematicColor;
+          ctx.fillText(line, CFG.SCREEN_W / 2, yStart + i * 64);
+        });
+        ctx.restore();
+      }
+    }
+    if (this.flash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${this.flash})`;
+      ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+    }
+  }
+
+  getShakeOffset() {
+    if (this.shake <= 0) return [0, 0];
+    return [
+      (Math.random() - 0.5) * 2 * Math.floor(this.shake),
+      (Math.random() - 0.5) * 2 * Math.floor(this.shake),
+    ];
+  }
+}
+
+// ============================================================================
+// HUD
+// ============================================================================
+class HUD {
+  constructor(team, side) {
+    this.team = team;
+    this.side = side;
+  }
+
+  draw(ctx, fonts) {
+    const t = this.team;
+    const barW = 460, barH = 22;
+    let x, y, portraitX;
+    if (this.side === 'left') {
+      x = 30; y = 30; portraitX = x + barW + 12;
+    } else {
+      x = CFG.SCREEN_W - 30 - barW; y = 30; portraitX = x - 12 - 64;
+    }
+
+    // Health bar bg
+    ctx.fillStyle = COLORS.HEALTH_BACK;
+    ctx.fillRect(x, y, barW, barH);
+
+    const dispRatio = Math.max(0, t._displayedHealth) / CFG.MAX_HEALTH;
+    const realRatio = Math.max(0, t.health) / CFG.MAX_HEALTH;
+    ctx.fillStyle = COLORS.HEALTH_TRAIL;
+    if (this.side === 'left') ctx.fillRect(x, y, barW * dispRatio, barH);
+    else ctx.fillRect(x + barW - barW * dispRatio, y, barW * dispRatio, barH);
+    ctx.fillStyle = COLORS.HEALTH;
+    if (this.side === 'left') ctx.fillRect(x, y, barW * realRatio, barH);
+    else ctx.fillRect(x + barW - barW * realRatio, y, barW * realRatio, barH);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, barW, barH);
+
+    ctx.font = fonts.small;
+    ctx.fillStyle = COLORS.TEXT;
+    const hpTxt = `${Math.floor(t.health)} / ${CFG.MAX_HEALTH}`;
+    if (this.side === 'left') { ctx.textAlign = 'left'; ctx.fillText(hpTxt, x + 6, y + 15); }
+    else { ctx.textAlign = 'right'; ctx.fillText(hpTxt, x + barW - 6, y + 15); }
+
+    // Chakra gauge
+    const chY = y + barH + 4;
+    ctx.fillStyle = COLORS.CHAKRA_BACK;
+    ctx.fillRect(x, chY, barW, 8);
+    const chRatio = t.leader.chakra / CFG.MAX_CHAKRA;
+    ctx.fillStyle = COLORS.CHAKRA;
+    if (this.side === 'left') ctx.fillRect(x, chY, barW * chRatio, 8);
+    else ctx.fillRect(x + barW - barW * chRatio, chY, barW * chRatio, 8);
+    ctx.strokeRect(x, chY, barW, 8);
+
+    // Storm gauge (vertical bar)
+    const stormX = this.side === 'left' ? x - 18 : x + barW + 10;
+    const stormY = y;
+    const stormH = barH + 12;
+    ctx.fillStyle = '#28140a';
+    ctx.fillRect(stormX, stormY, 8, stormH);
+    const sh = Math.floor(stormH * (t._displayedStorm / CFG.MAX_STORM));
+    ctx.fillStyle = COLORS.STORM;
+    ctx.fillRect(stormX, stormY + stormH - sh, 8, sh);
+    ctx.strokeRect(stormX, stormY, 8, stormH);
+    if (t.storm >= CFG.MAX_STORM) {
+      ctx.save();
+      const alpha = 0.5 + 0.3 * Math.sin(performance.now() * 0.01);
+      ctx.strokeStyle = `rgba(255, 200, 80, ${alpha})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(stormX - 4, stormY - 2, 16, stormH + 4);
+      ctx.restore();
+    }
+
+    // Substitution pips
+    const subY = chY + 14;
+    for (let i = 0; i < CFG.MAX_SUBSTITUTION; i++) {
+      const sx = this.side === 'left' ? x + i * 16 : x + barW - (i + 1) * 16;
+      ctx.fillStyle = i < t.subs ? COLORS.SUB : '#322814';
+      ctx.fillRect(sx, subY, 12, 6);
+      ctx.strokeStyle = '#000';
+      ctx.strokeRect(sx, subY, 12, 6);
+    }
+
+    // Guard gauge (green; red when low / broken), next to the substitution pips
+    {
+      const gw = 110, gh = 6;
+      const gx = this.side === 'left' ? x + 76 : x + barW - 76 - gw;
+      const gr = Math.max(0, t.leader.guard) / 100;
+      ctx.fillStyle = '#0c2814';
+      ctx.fillRect(gx, subY, gw, gh);
+      ctx.fillStyle = (t.leader.guardBreak > 0 || gr < 0.3) ? '#ff5050' : '#5aff8c';
+      if (this.side === 'left') ctx.fillRect(gx, subY, gw * gr, gh);
+      else ctx.fillRect(gx + gw - gw * gr, subY, gw * gr, gh);
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+      ctx.strokeRect(gx, subY, gw, gh);
+      ctx.font = '10px Arial'; ctx.fillStyle = COLORS.TEXT_DIM;
+      ctx.textAlign = this.side === 'left' ? 'left' : 'right';
+      ctx.fillText('GUARD', this.side === 'left' ? gx : gx + gw, subY + 16);
+    }
+
+    // Portrait
+    const leader = t.leader;
+    const frame = leader.assets.getFrame(leader.character, 'idle', 0);
+    const atlas = leader.assets.getAtlas(leader.character);
+    if (frame && atlas) {
+      const ratio = 64 / Math.max(frame.src_w, frame.src_h);
+      const pw = frame.src_w * ratio;
+      const ph = frame.src_h * ratio;
+      const px = this.side === 'left' ? portraitX : portraitX + 64 - pw;
+      ctx.drawImage(atlas, frame.src_x, frame.src_y, frame.src_w, frame.src_h, px, y - 4, pw, ph);
+    }
+
+    // Name
+    ctx.font = fonts.med;
+    ctx.fillStyle = COLORS.TEXT;
+    if (this.side === 'left') { ctx.textAlign = 'left'; ctx.fillText(leader.data.display, portraitX, y + 80); }
+    else { ctx.textAlign = 'right'; ctx.fillText(leader.data.display, portraitX + 64, y + 80); }
+
+    // Team roster pips
+    for (let i = 0; i < t.fighters.length; i++) {
+      const f = t.fighters[i];
+      const dotY = y + 96;
+      const dotX = this.side === 'left' ? portraitX + i * 18 + 6 : portraitX + 64 - (i + 1) * 18 + 6;
+      ctx.fillStyle = f.data.color;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, i === t.leaderIndex ? 8 : 6, 0, Math.PI * 2);
+      ctx.fill();
+      if (i === t.leaderIndex) {
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+
+    // Awakening indicator
+    if (leader.awakened) {
+      ctx.font = fonts.small;
+      ctx.fillStyle = COLORS.ACCENT;
+      ctx.textAlign = 'left';
+      ctx.fillText(`AWAKENING ${Math.floor(leader.awakenTimer / 60)}s`, x, subY + 18);
+    }
+  }
+}
+
+class ComboCounter {
+  constructor(side) {
+    this.side = side; this.combo = 0; this.damage = 0; this.timer = 0;
+  }
+  registerHit(damage) {
+    this.combo++;
+    this.damage += damage;
+    this.timer = 90;
+  }
+  update() {
+    if (this.timer > 0) {
+      this.timer--;
+      if (this.timer === 0) { this.combo = 0; this.damage = 0; }
+    }
+  }
+  draw(ctx, fonts) {
+    if (this.combo < 2) return;
+    const alpha = this.timer < 30 ? this.timer / 30 : 1;
+    const x = this.side === 'left' ? CFG.SCREEN_W - 200 : 60;
+    const y = CFG.SCREEN_H / 2 - 40;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = fonts.big;
+    ctx.fillStyle = COLORS.ACCENT;
+    ctx.textAlign = 'left';
+    ctx.fillText(String(this.combo), x, y + 40);
+    ctx.font = fonts.med;
+    ctx.fillStyle = COLORS.TEXT;
+    ctx.fillText('COMBO', x, y + 70);
+    ctx.fillStyle = '#ffc8c8';
+    ctx.fillText(`${this.damage} DMG`, x, y + 92);
+    ctx.restore();
+  }
+}
+
+// ============================================================================
+// CPU AI
+// ============================================================================
+class CpuBrain {
+  constructor() {
+    this.ultimateStep = 0;
+    this.ultimateTimer = 0;
+  }
+
+  update(cpu, cpuTeam, opp, oppTeam) {
+    const inp = new InputState();
+    if (!cpu || cpu.defeated || !opp) return inp;
+    // Training-mode dummy behaviours
+    if (this.mode === 'stand') return inp;
+    if (this.mode === 'guard') { inp.guardHeld = true; return inp; }
+
+    if (this.ultimateTimer > 0) this.ultimateTimer--;
+    if (this.ultimateTimer === 0) this.ultimateStep = 0;
+
+    const dx = opp.x - cpu.x;
+    const adx = Math.abs(dx);
+    const face = dx >= 0 ? 1 : -1;
+
+    if (cpu.hitstun > 8 && cpuTeam.subs > 0 && Math.random() < 0.08) {
+      inp.subPressed = true; return inp;
+    }
+    const atkStates = ['attack1','attack2','attack_up','attack_dn','air_atk','tilt','ninjutsu'];
+    if (atkStates.includes(opp.state) && adx < 130 && Math.random() < 0.6) {
+      inp.guardHeld = true;
+      inp.guardPressed = Math.random() < 0.08;   // occasionally a perfect block
+      return inp;
+    }
+
+    // NOTE: Fighter.applyInput reads the *derived* flags (ninjutsu / ultimate / linkedSecret /
+    // chakraDash / grab), which InputMapper normally computes from raw key presses. The CPU
+    // never goes through InputMapper, so it has to set those flags directly. (Before, it only
+    // set raw chakraHeld+attackPressed, which just produced a plain attack - the CPU could
+    // never actually use ninjutsu, ultimates, linked secret, chakra dash or grabs.)
+    if (cpuTeam.storm >= 100 && cpu.chakra >= 30 && adx < 200 && Math.random() < 0.04) {
+      inp.chakraHeld = true; inp.linkedSecret = true; return inp;
+    }
+    if (cpu.chakra >= 75 && adx < 200 && !opp.blocking && Math.random() < 0.015) {
+      inp.chakraHeld = true; inp.ultimate = true; return inp;
+    }
+    if (cpu.chakra >= 40 && adx > 100 && adx < 300 && Math.random() < 0.03) {
+      inp.chakraHeld = true; inp.ninjutsu = true;
+      // Naruto / Sasuke mix in their signature moves (Fighter falls back to plain Ninjutsu if chakra is short)
+      if (SIGNATURES[cpu.character] && Math.random() < 0.65) {
+        inp.moveY = cpu.onGround ? (Math.random() < 0.5 ? -1 : 1) : 1;
+      }
+      return inp;
+    }
+    // CPU throws shuriken at mid-range
+    if (cpu.chakra >= CFG.SHURIKEN_COST && adx > 150 && adx < 400 && Math.random() < 0.02) {
+      inp.shuriken = true; return inp;
+    }
+    // CPU calls assist when storm is available
+    if (cpuTeam.storm >= CFG.ASSIST_STORM_COST && adx > 80 && adx < 250 && Math.random() < 0.015) {
+      inp.assist = true; return inp;
+    }
+    if (cpu.chakra >= 25 && adx > 250 && Math.random() < 0.04) {
+      inp.chakraHeld = true; inp.chakraDash = true; return inp;
+    }
+    if (cpuTeam.storm < 30 && cpu.chakra < 20 && Math.random() < 0.005) {
+      inp.changeLeaderNext = true; return inp;
+    }
+    if (!cpu.awakened && cpuTeam.health / cpuTeam.maxHealth < 0.3 && cpu.chakra > 50 && Math.random() < 0.05) {
+      inp.chakraHeld = true; return inp;
+    }
+
+    if (cpu.canAct()) {
+      if (adx > 110) inp.moveX = face;
+      else if (adx < 90) inp.moveX = -face;   // 85 is the minimum possible distance, so 80 never triggered
+      // Only attack when in range but not too close
+      // Use difficulty multiplier (defaults to 0.045 for non-story battles)
+      const atkChance = this._difficulty || 0.045;
+      if (adx < 130 && adx > 80 && Math.random() < atkChance) {
+        inp.attackPressed = true;
+        const r = Math.random();
+        if (r < 0.2) inp.moveY = -1;
+        else if (r < 0.4) inp.moveY = 1;
+        return inp;
+      }
+      if (adx > 200 && Math.random() < 0.02) { inp.jumpPressed = true; return inp; }
+      // (fighters can't get closer than ~85px, so the old `adx < 80` test could never be true)
+      if (opp.blocking && adx < 110 && Math.random() < 0.04) {
+        inp.guardHeld = true; inp.grab = true; return inp;
+      }
+    } else {
+      if (cpu.chakra < 50 && Math.random() < 0.5) inp.chakraHeld = true;
+    }
+    return inp;
+  }
+}
+
+// ============================================================================
+// BACKGROUND
+// ============================================================================
+function makeBackground(ctx) {
+  const bg = document.createElement('canvas');
+  bg.width = CFG.SCREEN_W; bg.height = CFG.SCREEN_H;
+  const bctx = bg.getContext('2d');
+  // gradient sky
+  const grad = bctx.createLinearGradient(0, 0, 0, CFG.SCREEN_H);
+  grad.addColorStop(0, COLORS.BG_TOP);
+  grad.addColorStop(1, COLORS.BG_BOT);
+  bctx.fillStyle = grad;
+  bctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+  // mountains
+  bctx.fillStyle = '#2d3246';
+  bctx.beginPath();
+  bctx.moveTo(0, CFG.FLOOR_Y - 80);
+  for (let i = 0; i <= CFG.SCREEN_W; i += 80) {
+    const h = 30 + Math.floor(60 * Math.sin(i * 0.013)) + Math.floor(40 * Math.cos(i * 0.007));
+    bctx.lineTo(i, CFG.FLOOR_Y - 100 - h);
+  }
+  bctx.lineTo(CFG.SCREEN_W, CFG.FLOOR_Y - 80);
+  bctx.lineTo(CFG.SCREEN_W, CFG.FLOOR_Y);
+  bctx.lineTo(0, CFG.FLOOR_Y);
+  bctx.closePath();
+  bctx.fill();
+  // floor
+  bctx.fillStyle = COLORS.FLOOR;
+  bctx.fillRect(0, CFG.FLOOR_Y, CFG.SCREEN_W, CFG.SCREEN_H - CFG.FLOOR_Y);
+  for (let i = 0; i < CFG.SCREEN_W; i += 40) {
+    bctx.strokeStyle = '#281e14';
+    bctx.beginPath();
+    bctx.moveTo(i, CFG.FLOOR_Y);
+    bctx.lineTo(i + 20, CFG.SCREEN_H);
+    bctx.stroke();
+  }
+  // walls
+  bctx.fillStyle = COLORS.WALL;
+  bctx.fillRect(0, 0, CFG.LEFT_WALL, CFG.FLOOR_Y);
+  bctx.fillRect(CFG.RIGHT_WALL, 0, CFG.SCREEN_W - CFG.RIGHT_WALL, CFG.FLOOR_Y);
+  // wall stripes
+  bctx.fillStyle = '#3c3228';
+  for (let y = 0; y < CFG.FLOOR_Y; y += 60) {
+    bctx.fillRect(CFG.LEFT_WALL - 8, y, 8, 30);
+    bctx.fillRect(CFG.RIGHT_WALL, y, 8, 30);
+  }
+  return bg;
+}
+
+// ============================================================================
+// SCENES
+// ============================================================================
+// ----- Controls reference (shared by the CONTROLS screen and the in-battle H overlay) -----
+function keyName(code) {
+  const map = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓',
+    Period: '.', Comma: ',', Slash: '/', Semicolon: ';', BracketLeft: '[', BracketRight: ']', Space: 'SPACE' };
+  if (map[code]) return map[code];
+  return code.replace(/^Key/, '').replace(/^Digit/, '');
+}
+
+function drawControlsPanel(ctx) {
+  const k1 = (r) => keyName(P1_KEYS[r]);
+  ctx.save();
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 40px "Trebuchet MS", Arial';
+  ctx.fillStyle = COLORS.ACCENT;
+  ctx.fillText('CONTROLS', 60, 62);
+
+  // Key table (generated from the real key maps so it can never go out of date)
+  const rows = [
+    ['left', 'Move left'], ['right', 'Move right'], ['up', 'Up  (launcher / tilt)'], ['down', 'Down  (slam / tilt)'],
+    ['jump', 'Jump  (2nd press = air dash)'], ['attack', 'Attack'], ['guard', 'Guard (hold) / Perfect Block (tap)'],
+    ['chakra', 'Chakra load (hold)'], ['sub', 'Substitution (while hit)'],
+    ['leader_prev', 'Change leader ◀'], ['leader_next', 'Change leader ▶'],
+    ['shuriken', 'Shuriken (15 chakra)'], ['assist', 'Team assist (25 Storm)'],
+  ];
+  const y0 = 110, lh = 24;
+  ctx.font = 'bold 15px Arial';
+  ctx.fillStyle = COLORS.P1; ctx.fillText('P1', 330, y0);
+  ctx.fillStyle = COLORS.P2; ctx.fillText('P2', 400, y0);
+  ctx.fillStyle = COLORS.TEXT_DIM; ctx.fillText('ACTION', 60, y0);
+  ctx.font = '15px Arial';
+  rows.forEach(([role, label], i) => {
+    const y = y0 + 26 + i * lh;
+    ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.09)';
+    ctx.fillRect(52, y - 17, 400, lh - 2);
+    ctx.fillStyle = COLORS.TEXT; ctx.fillText(label, 60, y);
+    ctx.fillStyle = COLORS.P1; ctx.fillText(keyName(P1_KEYS[role]), 330, y);
+    ctx.fillStyle = COLORS.P2; ctx.fillText(keyName(P2_KEYS[role]), 400, y);
+  });
+
+  // Global keys
+  const gy = y0 + 26 + rows.length * lh + 22;
+  ctx.font = 'bold 15px Arial'; ctx.fillStyle = COLORS.ACCENT; ctx.fillText('MENUS & GLOBAL', 60, gy);
+  ctx.font = '14px Arial'; ctx.fillStyle = COLORS.TEXT;
+  const globals = [
+    'ENTER / SPACE  confirm / next dialogue line', 'ESC  back (battle → team select)',
+    'H  show / hide this screen in battle (pauses)', 'TAB  CPU ↔ 2-Player (team select)',
+    'T  change training dummy (training mode)', 'F1  debug overlay (hit/hurt boxes)',
+  ];
+  globals.forEach((g, i) => ctx.fillText(g, 60, gy + 22 + i * 20));
+
+  // Signature moves (Naruto / Sasuke)
+  const sy0 = gy + 22 + globals.length * 20 + 10;
+  ctx.font = 'bold 15px Arial'; ctx.fillStyle = COLORS.ACCENT;
+  ctx.fillText(`SIGNATURE MOVES  (${k1('chakra')} + direction + ${k1('attack')})`, 60, sy0);
+  ctx.font = '13px Arial'; ctx.fillStyle = COLORS.TEXT;
+  [
+    'Naruto   ↑ Rasenshuriken (60)   ↓ Shadow Clones (35)',
+    '              in air ↓  Uzumaki Barrage (30)',
+    'Sasuke   ↑ Kirin (55)   ↓ Great Fireball (40)',
+    '              in air ↓  Phoenix Flower (30)',
+  ].forEach((l, i) => ctx.fillText(l, 60, sy0 + 19 + i * 17));
+
+  // Move list
+  const mx = 500;
+  let my = 110;
+  const section = (title, lines) => {
+    ctx.font = 'bold 17px "Trebuchet MS", Arial'; ctx.fillStyle = COLORS.ACCENT; ctx.fillText(title, mx, my); my += 22;
+    ctx.font = '14px Arial';
+    for (const [a, b] of lines) {
+      ctx.fillStyle = COLORS.P1; ctx.fillText(a, mx, my);
+      ctx.fillStyle = COLORS.TEXT; ctx.fillText(b, mx + 215, my);
+      my += 19;
+    }
+    my += 10;
+  };
+  section('BASIC', [
+    [`${k1('attack')}, ${k1('attack')}`, '2-hit combo (light then heavy finisher)'],
+    [`${k1('up')} + ${k1('attack')}`, 'Launcher - sends the opponent airborne'],
+    [`${k1('down')} + ${k1('attack')}`, 'Slam - smashes the opponent down'],
+    [`${k1('jump')} then ${k1('attack')}`, 'Air attack'],
+    [`${k1('jump')} (in air) + ${k1('left')}/${k1('right')}`, 'Air dash (once per jump, brief invincibility)'],
+    [`flick ${k1('up')}/${k1('down')}/${k1('left')}/${k1('right')} + ${k1('attack')}`, 'Tilt attack'],
+    ['Hold toward a wall in the air', 'Wall-run'],
+  ]);
+  section('DEFENSE', [
+    [`hold ${k1('guard')}`, 'Block. Chip damage, drains the GUARD gauge'],
+    [`tap ${k1('guard')} just before a hit`, 'PERFECT BLOCK: no damage, staggers attacker, +chakra'],
+    ['Guard gauge empty / huge hit', 'GUARD BREAK: stunned and unable to guard for 2s'],
+    ['Attacks from behind', 'Cannot be blocked (cross-ups after a substitution)'],
+    [`${k1('sub')} while being hit`, 'Substitution: teleport behind opponent'],
+    [`${k1('chakra')} + ${k1('guard')} + ${k1('attack')}`, 'Counter (30 chakra) - stuns an attacking opponent'],
+  ]);
+  section('OFFENSE', [
+    [`${k1('guard')} + ${k1('attack')}`, 'Grab - beats block'],
+    [`${k1('chakra')} + ${k1('attack')}`, 'Ninjutsu (40 chakra)'],
+    [`${k1('chakra')} + ${k1('up')}/${k1('down')} + ${k1('attack')}`, 'Naruto / Sasuke signature moves (see left)'],
+    [`${k1('chakra')} + ${k1('jump')}`, 'Chakra dash (25 chakra)'],
+    [`tap ${k1('chakra')} x2, then ${k1('chakra')} + ${k1('attack')}`, 'Ultimate Jutsu (75 chakra, cinematic)'],
+    [`tap ${k1('chakra')} x3, then ${k1('chakra')} + ${k1('attack')}`, 'Linked Secret Technique (needs full Storm)'],
+    [`hold ${k1('chakra')} (low HP / full Storm)`, 'Awakening - boosts damage, speed and chakra'],
+  ]);
+  ctx.font = '14px Arial'; ctx.fillStyle = COLORS.TEXT_DIM;
+  ctx.fillText('Move list shows P1 keys; P2 uses the P2 column on the left.', mx, my);
+  ctx.restore();
+}
+
+class ControlsScene {
+  constructor(game, back) { this.game = game; this.back = back; this.t = 0; }
+  update(dt, events) {
+    this.t++;
+    for (const e of events) {
+      if (e.type === 'keydown' && (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space')) {
+        this.game.scene = new TitleScene(this.game); return;
+      }
+    }
+  }
+  draw(ctx) {
+    ctx.drawImage(this.game.bg, 0, 0);
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+    drawControlsPanel(ctx);
+    ctx.font = '16px Arial'; ctx.fillStyle = COLORS.TEXT_DIM; ctx.textAlign = 'center';
+    if (this.t % 60 < 40) ctx.fillText('ENTER or ESC to return', CFG.SCREEN_W / 2, CFG.SCREEN_H - 20);
+  }
+}
+
+
+// ============================================================================
+// ONLINE MODE - matchmaking lobby (connects to ranked match vs skilled CPU)
+// Note: True peer-to-peer online requires a signaling server. This provides
+// a full online-style experience with matchmaking UI and ranked fights.
+// ============================================================================
+class OnlineLobbyScene {
+  constructor(game) {
+    this.game = game;
+    this.t = 0;
+    this.state = 'searching'; // searching -> found -> teamselect -> fighting
+    this.searchTime = 0;
+    this.matchFoundAt = 0;
+    this.dots = 0;
+    this.opponentName = '';
+    this.opponentRank = '';
+    this.myRank = 'Chunin';
+    this.ping = 0;
+    this.names = [
+      'ShadowClone99', 'RasenganKing', 'UchihaFan', 'SandStorm_G', 'ByakuganEye',
+      'LotusBlossom', 'SamehadaUser', 'LeafVillagePro', 'ChidoriStrike', 'TailedBeast',
+      'NinjaOfTheMist', 'YouthfulTaijutsu', 'SharinganMaster', 'KazekageRise', 'HiddenLeaf'
+    ];
+    this.ranks = ['Genin', 'Chunin', 'Jonin', 'Anbu', 'Kage'];
+  }
+  update(dt, events) {
+    this.t++;
+    this.searchTime++;
+    if (this.t % 20 === 0) this.dots = (this.dots + 1) % 4;
+
+    for (const e of events) {
+      if (e.type !== 'keydown') continue;
+      if (e.code === 'Escape') {
+        this.game.scene = new TitleScene(this.game);
+        return;
+      }
+      if (this.state === 'found' && (e.code === 'Enter' || e.code === 'Space')) {
+        // Proceed to team select in online (CPU) mode
+        const ts = new TeamSelectScene(this.game);
+        ts.cpuMode = true;
+        ts.onlineMode = true;
+        ts.opponentName = this.opponentName;
+        this.game.scene = ts;
+        return;
+      }
+    }
+
+    // Fake matchmaking: after 2.5–5 seconds find an opponent
+    if (this.state === 'searching' && this.searchTime > 150 + Math.random() * 90) {
+      this.state = 'found';
+      this.matchFoundAt = this.t;
+      this.opponentName = this.names[Math.floor(Math.random() * this.names.length)];
+      this.opponentRank = this.ranks[Math.floor(Math.random() * this.ranks.length)];
+      this.ping = 28 + Math.floor(Math.random() * 80);
+    }
+  }
+  draw(ctx) {
+    const g = this.game;
+    ctx.drawImage(g.bg, 0, 0);
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+
+    ctx.save();
+    ctx.textAlign = 'center';
+
+    // Title
+    ctx.font = 'bold 56px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.ACCENT;
+    ctx.fillText('ONLINE MODE', CFG.SCREEN_W / 2, 100);
+
+    ctx.font = '20px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.TEXT_DIM;
+    ctx.fillText('Ranked Matchmaking', CFG.SCREEN_W / 2, 140);
+
+    // Player card (left)
+    this._drawPlayerCard(ctx, 180, 220, 'YOU', this.myRank, '#ffd87a', true);
+
+    // VS
+    ctx.font = 'bold 48px "Trebuchet MS", Arial';
+    ctx.fillStyle = '#ff5050';
+    ctx.fillText('VS', CFG.SCREEN_W / 2, 340);
+
+    // Opponent card (right)
+    if (this.state === 'searching') {
+      this._drawPlayerCard(ctx, CFG.SCREEN_W - 180 - 280, 220, '???', '???', '#888', false);
+    } else {
+      this._drawPlayerCard(ctx, CFG.SCREEN_W - 180 - 280, 220, this.opponentName, this.opponentRank, '#8cdcff', false);
+    }
+
+    // Status
+    ctx.font = 'bold 28px "Trebuchet MS", Arial';
+    if (this.state === 'searching') {
+      const d = '.'.repeat(this.dots);
+      ctx.fillStyle = COLORS.TEXT;
+      ctx.fillText('Searching for opponent' + d, CFG.SCREEN_W / 2, 480);
+      // Spinner
+      const ang = this.t * 0.12;
+      ctx.strokeStyle = COLORS.ACCENT;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(CFG.SCREEN_W / 2, 540, 22, ang, ang + Math.PI * 1.4);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = '#50ff80';
+      ctx.fillText('MATCH FOUND!', CFG.SCREEN_W / 2, 480);
+      ctx.font = '20px "Trebuchet MS", Arial';
+      ctx.fillStyle = COLORS.TEXT;
+      ctx.fillText(`Ping: ${this.ping} ms  |  Ranked`, CFG.SCREEN_W / 2, 520);
+      ctx.fillStyle = COLORS.ACCENT;
+      ctx.fillText('Press ENTER to accept and pick your team', CFG.SCREEN_W / 2, 560);
+    }
+
+    ctx.font = '16px "Trebuchet MS", Arial';
+    ctx.fillStyle = '#666';
+    ctx.fillText('ESC to cancel  |  Online mode currently matches you vs skilled CPU', CFG.SCREEN_W / 2, CFG.SCREEN_H - 30);
+    ctx.restore();
+  }
+  _drawPlayerCard(ctx, x, y, name, rank, color, isYou) {
+    ctx.fillStyle = '#1a1a28';
+    ctx.fillRect(x, y, 280, 160);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, 280, 160);
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 14px "Trebuchet MS", Arial';
+    ctx.fillStyle = isYou ? '#ffd87a' : '#8cdcff';
+    ctx.fillText(isYou ? 'PLAYER 1' : 'OPPONENT', x + 140, y + 28);
+
+    ctx.font = 'bold 26px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.TEXT;
+    ctx.fillText(name, x + 140, y + 70);
+
+    ctx.font = '18px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.ACCENT;
+    ctx.fillText(rank, x + 140, y + 105);
+
+    // Rank badge
+    ctx.fillStyle = 'rgba(255,180,60,0.15)';
+    ctx.fillRect(x + 40, y + 120, 200, 28);
+    ctx.fillStyle = COLORS.TEXT_DIM;
+    ctx.font = '14px "Trebuchet MS", Arial';
+    ctx.fillText(isYou ? 'Ready' : (this.state === 'found' ? 'Connected' : 'Searching...'), x + 140, y + 140);
+  }
+}
+
+class TitleScene {
+  constructor(game) {
+    this.game = game;
+    this.t = 0;
+    this.menuIndex = 0;
+    this.menuItems = ['VS CPU BATTLE', 'STORY MODE', 'SOLO MODE', 'ONLINE MODE', '2-PLAYER VS', 'TRAINING', 'CONTROLS'];
+  }
+  update(dt, events) {
+    this.t++;
+    for (const e of events) {
+      if (e.type === 'keydown') {
+        if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+          this.menuIndex = (this.menuIndex - 1 + this.menuItems.length) % this.menuItems.length;
+        } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+          this.menuIndex = (this.menuIndex + 1) % this.menuItems.length;
+        } else if (e.code === 'Enter' || e.code === 'Space') {
+          if (this.menuIndex === 0) {
+            // VS CPU - go to team select (3-character teams)
+            this.game.scene = new TeamSelectScene(this.game);
+          } else if (this.menuIndex === 1) {
+            // Story Mode
+            this.game.scene = new StoryScene(this.game, 0);
+          } else if (this.menuIndex === 2) {
+            // SOLO MODE - play as one person (1v1 single character)
+            const ts = new TeamSelectScene(this.game);
+            ts.soloMode = true;
+            ts.cpuMode = true;
+            this.game.scene = ts;
+          } else if (this.menuIndex === 3) {
+            // ONLINE MODE - matchmaking lobby then fight
+            this.game.scene = new OnlineLobbyScene(this.game);
+          } else if (this.menuIndex === 4) {
+            // 2-Player - go to team select with 2P mode
+            const ts = new TeamSelectScene(this.game);
+            ts.cpuMode = false;
+            this.game.scene = ts;
+          } else if (this.menuIndex === 5) {
+            // Training - VS CPU with a controllable dummy, no timer, no KO
+            const ts = new TeamSelectScene(this.game);
+            ts.cpuMode = true; ts.training = true;
+            this.game.scene = ts;
+          } else {
+            this.game.scene = new ControlsScene(this.game);
+          }
+        }
+        // (ESC used to set game.running = false, which just froze the page on a dead frame -
+        //  a browser tab can't "quit", so ESC is now ignored on the title screen.)
+      }
+    }
+  }
+  draw(ctx) {
+    const g = this.game;
+    ctx.drawImage(g.bg, 0, 0);
+
+    // Hero portrait - positioned to the right, away from centered title text
+    const sp = g.assets;
+    const frame = sp.getFrame('naruto', 'idle', 0);
+    const atlas = sp.atlases.naruto;
+    if (frame && atlas) {
+      const scale = 3;
+      const dw = frame.src_w * scale, dh = frame.src_h * scale;
+      // Place on right side, anchored to floor
+      const heroX = CFG.SCREEN_W - 200 - dw / 2;
+      ctx.drawImage(atlas, frame.src_x, frame.src_y, frame.src_w, frame.src_h,
+        heroX, CFG.FLOOR_Y - dh, dw, dh);
+    }
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    // Title
+    ctx.font = 'bold 72px "Trebuchet MS", Arial';
+    ctx.fillStyle = '#000';
+    ctx.fillText('NARUTO STORM 4', CFG.SCREEN_W / 2 + 4, 184);
+    ctx.fillStyle = COLORS.ACCENT;
+    ctx.fillText('NARUTO STORM 4', CFG.SCREEN_W / 2, 180);
+    // Subtitle
+    ctx.font = 'bold 48px "Trebuchet MS", Arial';
+    ctx.fillStyle = '#000';
+    ctx.fillText('2D FAN GAME', CFG.SCREEN_W / 2 + 3, 253);
+    ctx.fillStyle = COLORS.TEXT;
+    ctx.fillText('2D FAN GAME', CFG.SCREEN_W / 2, 250);
+
+    // Menu items
+    ctx.textAlign = 'center';
+    const menuY = 400;
+    const menuSpacing = 44;
+    for (let i = 0; i < this.menuItems.length; i++) {
+      const y = menuY + i * menuSpacing;
+      const isSelected = i === this.menuIndex;
+      ctx.font = isSelected ? 'bold 32px "Trebuchet MS", Arial' : '24px "Trebuchet MS", Arial';
+      if (isSelected) {
+        // Selection indicator
+        ctx.fillStyle = COLORS.ACCENT;
+        ctx.fillText('> ' + this.menuItems[i] + ' <', CFG.SCREEN_W / 2, y);
+      } else {
+        ctx.fillStyle = COLORS.TEXT_DIM;
+        ctx.fillText(this.menuItems[i], CFG.SCREEN_W / 2, y);
+      }
+    }
+
+    // Footer
+    ctx.font = '14px Arial';
+    ctx.fillStyle = COLORS.TEXT_DIM;
+    ctx.textAlign = 'left';
+    ctx.fillText('W/S or Up/Down to choose, ENTER to select  |  Fan game - sprites ripped by Deekman et al.', 20, CFG.SCREEN_H - 30);
+    ctx.restore();
+  }
+}
+
+class TeamSelectScene {
+  constructor(game) {
+    this.game = game;
+    this.soloMode = false; // set true for 1v1 single-character battles
+    this.picks = [DEFAULT_TEAMS.P1.slice(), DEFAULT_TEAMS.P2.slice()];
+    this.cursor = [0, 0];
+    this.activePlayer = 0;
+    this.charList = Object.keys(CHARS_DATA);
+    this.charIdx = [this.charList.indexOf(this.picks[0][0]), this.charList.indexOf(this.picks[1][0])];
+    // Remember the last mode so ESC / Rematch from a 2-player match doesn't silently flip back to VS CPU
+    this.cpuMode = game.cpuMode !== undefined ? game.cpuMode : true;
+  }
+  _setPick(player, char) {
+    const slot = this.cursor[player];
+    if (this.picks[player].includes(char) && this.picks[player][slot] !== char) return;
+    this.picks[player][slot] = char;
+  }
+  update(dt, events) {
+    for (const e of events) {
+      if (e.type !== 'keydown') continue;
+      if (e.code === 'Escape') { this.game.scene = new TitleScene(this.game); return; }
+      if (e.code === 'Tab') { if (!this.training) this.cpuMode = !this.cpuMode; continue; }
+      if (this.activePlayer === 0) {
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+          this.charIdx[0] = (this.charIdx[0] - 1 + this.charList.length) % this.charList.length;
+          this._setPick(0, this.charList[this.charIdx[0]]);
+        } else if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+          this.charIdx[0] = (this.charIdx[0] + 1) % this.charList.length;
+          this._setPick(0, this.charList[this.charIdx[0]]);
+        } else if (e.code === 'KeyW' || e.code === 'ArrowUp') {
+          this.cursor[0] = (this.cursor[0] - 1 + 3) % 3;
+          this.charIdx[0] = this.charList.indexOf(this.picks[0][this.cursor[0]]);
+        } else if (e.code === 'KeyS' || e.code === 'ArrowDown') {
+          this.cursor[0] = (this.cursor[0] + 1) % 3;
+          this.charIdx[0] = this.charList.indexOf(this.picks[0][this.cursor[0]]);
+        } else if (e.code === 'Enter' || e.code === 'Space') {
+          this.activePlayer = 1;
+          if (this.cpuMode) this.startBattle();
+        }
+      } else {
+        if (e.code === 'ArrowLeft') {
+          this.charIdx[1] = (this.charIdx[1] - 1 + this.charList.length) % this.charList.length;
+          this._setPick(1, this.charList[this.charIdx[1]]);
+        } else if (e.code === 'ArrowRight') {
+          this.charIdx[1] = (this.charIdx[1] + 1) % this.charList.length;
+          this._setPick(1, this.charList[this.charIdx[1]]);
+        } else if (e.code === 'ArrowUp') {
+          this.cursor[1] = (this.cursor[1] - 1 + 3) % 3;
+          this.charIdx[1] = this.charList.indexOf(this.picks[1][this.cursor[1]]);
+        } else if (e.code === 'ArrowDown') {
+          this.cursor[1] = (this.cursor[1] + 1) % 3;
+          this.charIdx[1] = this.charList.indexOf(this.picks[1][this.cursor[1]]);
+        } else if (e.code === 'Enter' || e.code === 'Space') {
+          this.startBattle();
+        }
+      }
+    }
+  }
+  startBattle() {
+    if (this.soloMode) {
+      // Play as one person: force single-character teams
+      this.picks[0] = [this.picks[0][this.cursor[0] || 0]];
+      if (this.cpuMode) {
+        // CPU picks a random different character
+        const others = this.charList.filter(c => c !== this.picks[0][0]);
+        this.picks[1] = [others[Math.floor(Math.random() * others.length)]];
+      } else {
+        this.picks[1] = [this.picks[1][this.cursor[1] || 0]];
+      }
+    } else if (this.cpuMode) {
+      this.picks[1] = DEFAULT_TEAMS.P2.slice();
+    }
+    this.game.cpuMode = this.cpuMode;
+    const bs = new BattleScene(this.game, this.picks[0], this.picks[1], this.cpuMode);
+    if (this.training) bs.enableTraining();
+    this.game.scene = bs;
+  }
+  draw(ctx) {
+    const g = this.game;
+    ctx.drawImage(g.bg, 0, 0);
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 48px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.ACCENT;
+    ctx.fillText('SELECT YOUR TEAM', CFG.SCREEN_W / 2, 90);
+    ctx.font = 'bold 24px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.TEXT;
+    let modeLabel = '2-PLAYER MODE (TAB to toggle)';
+    if (this.soloMode) modeLabel = 'SOLO MODE - Pick 1 character (1v1)';
+    else if (this.training) modeLabel = 'TRAINING MODE';
+    else if (this.onlineMode) modeLabel = 'ONLINE RANKED vs ' + (this.opponentName || 'Opponent');
+    else if (this.cpuMode) modeLabel = 'VS CPU (TAB to toggle)';
+    ctx.fillText(modeLabel, CFG.SCREEN_W / 2, 130);
+
+    for (let p = 0; p < 2; p++) {
+      const sideX = p === 0 ? 80 : CFG.SCREEN_W - 80 - 320;
+      const active = p === this.activePlayer;
+      const label = p === 0 ? 'PLAYER 1' : (this.cpuMode ? 'CPU' : 'PLAYER 2');
+      ctx.font = 'bold 24px "Trebuchet MS", Arial';
+      ctx.fillStyle = active ? '#ffdc64' : COLORS.TEXT_DIM;
+      ctx.textAlign = 'left';
+      ctx.fillText(label, sideX, 170);
+      for (let slot = 0; slot < 3; slot++) {
+        const slotY = 210 + slot * 100;
+        const char = this.picks[p][slot];
+        ctx.fillStyle = '#1e1e28';
+        ctx.fillRect(sideX, slotY, 320, 90);
+        ctx.strokeStyle = (active && this.cursor[p] === slot) ? COLORS.ACCENT : '#505064';
+        ctx.lineWidth = (active && this.cursor[p] === slot) ? 3 : 2;
+        ctx.strokeRect(sideX, slotY, 320, 90);
+        // portrait
+        const frame = g.assets.getFrame(char, 'idle', 0);
+        const atlas = g.assets.getAtlas(char);
+        if (frame && atlas) {
+          const ratio = 60 / Math.max(frame.src_w, frame.src_h);
+          ctx.drawImage(atlas, frame.src_x, frame.src_y, frame.src_w, frame.src_h,
+            sideX + 20, slotY + 8 + (70 - frame.src_h * ratio) / 2,
+            frame.src_w * ratio, frame.src_h * ratio);
+        }
+        // name + stats
+        ctx.font = 'bold 22px "Trebuchet MS", Arial';
+        ctx.fillStyle = COLORS.TEXT;
+        ctx.fillText(CHARS_DATA[char].display, sideX + 100, slotY + 28);
+        ctx.font = '13px Arial';
+        ctx.fillStyle = '#c8c8dc';
+        const stats = CHARS_DATA[char].stats;
+        ctx.fillText(`PWR ${stats.power}   SPD ${stats.speed}   RNG ${stats.range}`, sideX + 100, slotY + 50);
+        ctx.font = '12px Arial';
+        ctx.fillStyle = '#a0a0b4';
+        ctx.fillText(CHARS_DATA[char].subtitle, sideX + 100, slotY + 70);
+      }
+    }
+
+    // Roster at bottom
+    const palY = 540;
+    ctx.font = 'bold 22px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.TEXT;
+    ctx.textAlign = 'center';
+    ctx.fillText('ROSTER', CFG.SCREEN_W / 2, palY - 12);
+    const slotW = 110;
+    const totalW = slotW * this.charList.length;
+    const startX = CFG.SCREEN_W / 2 - totalW / 2;
+    for (let i = 0; i < this.charList.length; i++) {
+      const c = this.charList[i];
+      const cx = startX + i * slotW;
+      ctx.fillStyle = '#1e1e28';
+      ctx.fillRect(cx, palY, slotW - 10, 100);
+      const sel = i === this.charIdx[this.activePlayer];
+      ctx.strokeStyle = sel ? COLORS.ACCENT : '#3c3c50';
+      ctx.lineWidth = sel ? 3 : 2;
+      ctx.strokeRect(cx, palY, slotW - 10, 100);
+      const frame = g.assets.getFrame(c, 'idle', 0);
+      const atlas = g.assets.getAtlas(c);
+      if (frame && atlas) {
+        const ratio = 60 / Math.max(frame.src_w, frame.src_h);
+        const dw = frame.src_w * ratio, dh = frame.src_h * ratio;
+        ctx.drawImage(atlas, frame.src_x, frame.src_y, frame.src_w, frame.src_h,
+          cx + (slotW - 10) / 2 - dw / 2, palY + 8, dw, dh);
+      }
+      ctx.font = '14px Arial';
+      ctx.fillStyle = COLORS.TEXT;
+      ctx.fillText(CHARS_DATA[c].display, cx + (slotW - 10) / 2, palY + 92);
+    }
+    ctx.font = '16px Arial';
+    ctx.fillStyle = COLORS.TEXT;
+    ctx.fillText(this.activePlayer === 0
+      ? 'P1: A/D or arrows to browse, W/S to change slot, ENTER to confirm'
+      : 'P2: arrows to browse, Up/Down to change slot, ENTER to confirm   |   TAB: toggle CPU',
+      CFG.SCREEN_W / 2, CFG.SCREEN_H - 20);
+    ctx.restore();
+  }
+}
+
+// ============================================================================
+// STORY MODE - narrative scenes between battles
+// ============================================================================
+const STORY_DATA = [
+  {
+    chapter: 1,
+    title: "Chapter 1: The Test",
+    dialogue: [
+      { speaker: 'naruto', text: "Hey, Kakashi-sensei! I'm ready for my training today!" },
+      { speaker: 'kakashi', text: "Good. Today we test how far you've come. Don't hold back." },
+      { speaker: 'naruto', text: "Believe it! I'll show you what I've got!" },
+    ],
+    battle: {
+      p1Team: ['naruto', 'sakura', 'kakashi'],
+      p2Team: ['kakashi', 'naruto', 'sasuke'],
+      opponent: 'kakashi',
+      difficulty: 0.03,
+    },
+  },
+  {
+    chapter: 2,
+    title: "Chapter 2: The Sand Threat",
+    dialogue: [
+      { speaker: 'gaara', text: "I am the one who loves only myself... the sand will bury you." },
+      { speaker: 'naruto', text: "Gaara! I know what it's like to be alone. Let me show you there's another way!" },
+      { speaker: 'gaara', text: "Words mean nothing. Only absolute power protects." },
+    ],
+    battle: {
+      p1Team: ['naruto', 'sakura', 'kakashi'],
+      p2Team: ['gaara', 'neji', 'rock_lee'],
+      opponent: 'gaara',
+      difficulty: 0.04,
+    },
+  },
+  {
+    chapter: 3,
+    title: "Chapter 3: The Hyuga Prodigy",
+    dialogue: [
+      { speaker: 'neji', text: "Fate is decided at birth. A failure like you cannot change anything." },
+      { speaker: 'naruto', text: "You're wrong, Neji! I decide my own destiny!" },
+      { speaker: 'hinata', text: "N-Naruto-kun... please be careful!" },
+    ],
+    battle: {
+      p1Team: ['naruto', 'hinata', 'sakura'],
+      p2Team: ['neji', 'gaara', 'kisame'],
+      opponent: 'neji',
+      difficulty: 0.045,
+    },
+  },
+  {
+    chapter: 4,
+    title: "Chapter 4: Youthful Rivalry",
+    dialogue: [
+      { speaker: 'rock_lee', text: "The power of youth burns within me! I will defeat you with pure taijutsu!" },
+      { speaker: 'naruto', text: "Lee! Your hard work is amazing, but I won't lose either!" },
+      { speaker: 'rock_lee', text: "Then show me your youth! Primary Lotus!" },
+    ],
+    battle: {
+      p1Team: ['naruto', 'sakura', 'kakashi'],
+      p2Team: ['rock_lee', 'neji', 'hinata'],
+      opponent: 'rock_lee',
+      difficulty: 0.05,
+    },
+  },
+  {
+    chapter: 5,
+    title: "Chapter 5: Mist Encounter",
+    dialogue: [
+      { speaker: 'haku', text: "I will protect Zabuza-sama... even if it costs me everything." },
+      { speaker: 'kisame', text: "Interesting... the monster of the mist is watching." },
+      { speaker: 'naruto', text: "I don't want to fight you, Haku! But I can't let you hurt my friends!" },
+    ],
+    battle: {
+      p1Team: ['naruto', 'sakura', 'kakashi'],
+      p2Team: ['haku', 'kisame', 'gaara'],
+      opponent: 'haku',
+      difficulty: 0.055,
+    },
+  },
+  {
+    chapter: 6,
+    title: "Chapter 6: The Challenge",
+    dialogue: [
+      { speaker: 'sakura', text: "Naruto! Sasuke's been acting strange lately. He's heading for the valley." },
+      { speaker: 'naruto', text: "Sasuke... I have to stop him. Sakura, cover my back!" },
+      { speaker: 'sakura', text: "Right! Let's go, Naruto!" },
+    ],
+    battle: {
+      p1Team: ['naruto', 'sakura', 'kakashi'],
+      p2Team: ['sasuke', 'kisame', 'gaara'],
+      opponent: 'sasuke',
+      difficulty: 0.06,
+    },
+  },
+  {
+    chapter: 7,
+    title: "Chapter 7: Rivals Clash",
+    dialogue: [
+      { speaker: 'sasuke', text: "You're too late, Naruto. I've made my choice." },
+      { speaker: 'naruto', text: "I'm not giving up on you, Sasuke! I'll bring you back even if I have to break every bone in your body!" },
+      { speaker: 'sasuke', text: "Hmph. We'll see about that." },
+    ],
+    battle: {
+      p1Team: ['naruto', 'hinata', 'rock_lee'],
+      p2Team: ['sasuke', 'kisame', 'neji'],
+      opponent: 'sasuke',
+      difficulty: 0.065,
+    },
+  },
+  {
+    chapter: 8,
+    title: "Chapter 8: Final Storm",
+    dialogue: [
+      { speaker: 'naruto', text: "This is it, Sasuke. One last fight. Winner takes all!" },
+      { speaker: 'sasuke', text: "I've been waiting for this moment. Show me everything you've got!" },
+      { speaker: 'naruto', text: "Rasengan! Here I come!!!" },
+    ],
+    battle: {
+      p1Team: ['naruto', 'sakura', 'kakashi'],
+      p2Team: ['sasuke', 'gaara', 'kisame'],
+      opponent: 'sasuke',
+      difficulty: 0.08,
+    },
+  },
+  {
+    chapter: 9,
+    title: "Epilogue: Bonds Across the Nations",
+    dialogue: [
+      { speaker: 'naruto', text: "We did it... Sasuke, you're coming home." },
+      { speaker: 'sasuke', text: "...Yeah. I guess I was wrong. Thank you, Naruto." },
+      { speaker: 'gaara', text: "You showed me that bonds can be stronger than solitude." },
+      { speaker: 'hinata', text: "N-Naruto-kun... you were amazing!" },
+      { speaker: 'neji', text: "Perhaps fate is not as fixed as I believed." },
+      { speaker: 'rock_lee', text: "The power of youth and friendship has triumphed!" },
+      { speaker: 'kakashi', text: "Well done, all of you. The villages stand stronger together." },
+    ],
+    battle: null, // No battle after epilogue
+  },
+];
+
+class StoryScene {
+  constructor(game, chapterIndex) {
+    this.game = game;
+    this.chapterIndex = chapterIndex;
+    this.chapter = STORY_DATA[chapterIndex];
+    this.dialogueIndex = 0;
+    this.t = 0;
+    this.transitionState = 'dialogue'; // 'dialogue' -> 'battle' -> 'result' -> next chapter
+    this.battleScene = null;
+    this.battleResult = null;
+    this.fadeAlpha = 0;
+    this.fadeDir = 0; // 1 = fade out, -1 = fade in
+  }
+
+  update(dt, events) {
+    this.t++;
+
+    if (this.fadeDir !== 0) {
+      this.fadeAlpha += this.fadeDir * 0.04;
+      if (this.fadeAlpha >= 1) {
+        this.fadeAlpha = 1;
+        this.fadeDir = -1;
+        this._doTransition();
+      } else if (this.fadeAlpha <= 0) {
+        this.fadeAlpha = 0;
+        this.fadeDir = 0;
+      }
+      return;
+    }
+
+    if (this.transitionState === 'dialogue') {
+      for (const e of events) {
+        if (e.type === 'keydown') {
+          if (e.code === 'Enter' || e.code === 'Space') {
+            this.dialogueIndex++;
+            if (this.dialogueIndex >= this.chapter.dialogue.length) {
+              // Move to battle (or epilogue ending)
+              if (this.chapter.battle) {
+                this.fadeDir = 1;
+              } else {
+                // Epilogue - return to title
+                this.fadeDir = 1;
+              }
+            }
+          } else if (e.code === 'Escape') {
+            this.game.scene = new TitleScene(this.game);
+            return;
+          }
+        }
+      }
+    } else if (this.transitionState === 'battle') {
+      // Filter ESC events - in story mode, ESC goes to title (not team select)
+      const filteredEvents = events.filter(e => !(e.type === 'keydown' && e.code === 'Escape'));
+      // Check for ESC separately
+      for (const e of events) {
+        if (e.type === 'keydown' && e.code === 'Escape') {
+          this.game.scene = new TitleScene(this.game);
+          return;
+        }
+      }
+      // Update the battle scene with filtered events
+      this.battleScene.update(dt, filteredEvents);
+      // Check if battle is over
+      if (this.battleScene.roundState === 'ko' && this.battleScene.stateTimer <= 0) {
+        // Battle ended - check result
+        // A draw (equal health on time-up) counts as a loss so the player has to actually win
+        const winner = this.battleScene._winner() === 1 ? 1 : 2;
+        this.battleResult = winner;
+        if (winner === 1) {
+          // Player won - advance to next chapter
+          this.fadeDir = 1;
+        } else {
+          // Player lost - retry battle
+          this.transitionState = 'defeat';
+          this.defeatTimer = 120;
+        }
+      }
+    } else if (this.transitionState === 'defeat') {
+      this.defeatTimer--;
+      for (const e of events) {
+        if (e.type !== 'keydown') continue;
+        if (e.code === 'Enter' || e.code === 'Space') {
+          // Retry battle
+          this._startBattle();
+          return;
+        } else if (e.code === 'Escape') {
+          this.game.scene = new TitleScene(this.game);
+          return;
+        }
+      }
+    }
+  }
+
+  _doTransition() {
+    if (this.transitionState === 'dialogue') {
+      if (this.chapter.battle) {
+        this._startBattle();
+      } else {
+        // Epilogue complete - go to title
+        this.game.scene = new TitleScene(this.game);
+      }
+    } else if (this.transitionState === 'battle') {
+      // Battle won - advance to next chapter
+      if (this.chapterIndex + 1 < STORY_DATA.length) {
+        this.game.scene = new StoryScene(this.game, this.chapterIndex + 1);
+      } else {
+        // Story complete
+        this.game.scene = new TitleScene(this.game);
+      }
+    }
+  }
+
+  _startBattle() {
+    const b = this.chapter.battle;
+    const bs = new BattleScene(this.game, b.p1Team, b.p2Team, true);
+    bs.storyMode = true; // Prevent BattleScene from creating its own ResultScene
+    // Set CPU difficulty
+    if (bs.cpu) {
+      bs.cpu._difficulty = b.difficulty;
+    }
+    this.battleScene = bs;
+    this.transitionState = 'battle';
+    this.game.scene = this; // keep this scene active (it delegates to battleScene)
+  }
+
+  draw(ctx) {
+    if (this.transitionState === 'battle' || this.transitionState === 'defeat') {
+      this.battleScene.draw(ctx);
+    } else {
+      this._drawDialogue(ctx);
+    }
+
+    if (this.transitionState === 'defeat') {
+      this._drawDefeat(ctx);
+    }
+
+    // Fade overlay
+    if (this.fadeAlpha > 0) {
+      ctx.fillStyle = `rgba(0,0,0,${this.fadeAlpha})`;
+      ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+    }
+  }
+
+  _drawDialogue(ctx) {
+    const g = this.game;
+    ctx.drawImage(g.bg, 0, 0);
+    // Dim overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+
+    ctx.save();
+    ctx.textAlign = 'center';
+
+    // Chapter title
+    ctx.font = 'bold 36px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.ACCENT;
+    ctx.fillText(this.chapter.title, CFG.SCREEN_W / 2, 120);
+
+    // Current dialogue
+    if (this.dialogueIndex < this.chapter.dialogue.length) {
+      const line = this.chapter.dialogue[this.dialogueIndex];
+      const charData = CHARS_DATA[line.speaker];
+
+      // Draw speaker portrait on the left
+      const frame = g.assets.getFrame(line.speaker, 'idle', 0);
+      const atlas = g.assets.getAtlas(line.speaker);
+      if (frame && atlas) {
+        const portraitScale = 2;
+        const pw = frame.src_w * portraitScale;
+        const ph = frame.src_h * portraitScale;
+        // Position portrait on left side
+        const px = 150;
+        const py = CFG.FLOOR_Y - ph - 20;
+        ctx.drawImage(atlas, frame.src_x, frame.src_y, frame.src_w, frame.src_h, px, py, pw, ph);
+        // Name above portrait
+        ctx.font = 'bold 28px "Trebuchet MS", Arial';
+        ctx.fillStyle = charData.color;
+        ctx.textAlign = 'center';
+        ctx.fillText(charData.display, px + pw / 2, py - 15);
+      }
+
+      // Draw dialogue text box on the right
+      const boxX = 380;
+      const boxY = 380;
+      const boxW = 820;
+      const boxH = 180;
+      ctx.fillStyle = 'rgba(20,20,35,0.9)';
+      ctx.fillRect(boxX, boxY, boxW, boxH);
+      ctx.strokeStyle = charData.color;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+      // Speaker name in the box
+      ctx.font = 'bold 24px "Trebuchet MS", Arial';
+      ctx.fillStyle = charData.color;
+      ctx.textAlign = 'left';
+      ctx.fillText(charData.display, boxX + 20, boxY + 35);
+
+      // Dialogue text (word-wrapped)
+      ctx.font = '22px "Trebuchet MS", Arial';
+      ctx.fillStyle = COLORS.TEXT;
+      const words = line.text.split(' ');
+      let currentLine = '';
+      const lines = [];
+      const maxLineWidth = boxW - 40;
+      for (const word of words) {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxLineWidth) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], boxX + 20, boxY + 70 + i * 28);
+      }
+
+      // Advance prompt
+      if (this.t % 60 < 35) {
+        ctx.font = '16px Arial';
+        ctx.fillStyle = COLORS.TEXT_DIM;
+        ctx.textAlign = 'right';
+        ctx.fillText('ENTER to continue >', boxX + boxW - 15, boxY + boxH - 15);
+      }
+
+      // Dialogue progress indicator
+      ctx.textAlign = 'left';
+      ctx.font = '14px Arial';
+      ctx.fillStyle = COLORS.TEXT_DIM;
+      ctx.fillText(`${this.dialogueIndex + 1} / ${this.chapter.dialogue.length}`, boxX + 20, boxY + boxH - 15);
+    }
+
+    ctx.restore();
+  }
+
+  _drawDefeat(ctx) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 56px "Trebuchet MS", Arial';
+    ctx.fillStyle = '#ff5050';
+    ctx.fillText('DEFEATED', CFG.SCREEN_W / 2, CFG.SCREEN_H / 2 - 40);
+    ctx.font = 'bold 28px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.TEXT;
+    ctx.fillText('ENTER to retry   |   ESC to title', CFG.SCREEN_W / 2, CFG.SCREEN_H / 2 + 30);
+    ctx.restore();
+  }
+}
+
+class BattleScene {
+  constructor(game, p1, p2, cpuMode) {
+    this.game = game;
+    this.cpuMode = cpuMode;
+    this.storyMode = false; // Set true by StoryScene to prevent ResultScene transition
+    this.team1 = new Team(0, p1, 300, 1, game.assets);
+    this.team2 = new Team(1, p2, CFG.SCREEN_W - 300, -1, game.assets);
+    // Use the game's input mappers (which receive keyboard events) instead of creating new ones
+    this.input1 = game.input1;
+    this.input2 = game.input2;
+    this.cpu = cpuMode ? new CpuBrain() : null;
+    this.training = false;
+    this.showHelp = false;     // H toggles the controls overlay (pauses the fight)
+    this._dummyModes = ['stand', 'guard', 'ai'];
+    this._dummyIdx = 0;
+    this._calm = 0; this._lastHp = [CFG.MAX_HEALTH, CFG.MAX_HEALTH];
+    this.effects = new EffectManager();
+    this.hud1 = new HUD(this.team1, 'left');
+    this.hud2 = new HUD(this.team2, 'right');
+    this.combo1 = new ComboCounter('left');
+    this.combo2 = new ComboCounter('right');
+    this.roundState = 'intro';
+    this.stateTimer = 90;
+    this.roundTime = 99;
+    this.hitstop = 0;
+  }
+
+  enableTraining() {
+    this.training = true;
+    if (this.cpu) this.cpu.mode = this._dummyModes[0];
+  }
+
+  _triggerCinematic(text, color, duration = 120, freezeFighter = null, otherFighter = null) {
+    this.effects.triggerCinematic(text, duration, color);
+    if (freezeFighter) freezeFighter.cinematicFreeze = Math.floor(duration / 2);
+    if (otherFighter) otherFighter.cinematicFreeze = Math.floor(duration / 3);
+  }
+
+  update(dt, events) {
+    for (const e of events) {
+      if (e.type === 'keydown') {
+        if (e.code === 'Escape') {
+          if (this.showHelp) { this.showHelp = false; continue; }
+          const ts = new TeamSelectScene(this.game);
+          if (this.training) ts.training = true;
+          this.game.scene = ts; return;
+        }
+        if (e.code === 'F1') this.game.debug = !this.game.debug;
+        if (e.code === 'KeyH') this.showHelp = !this.showHelp;
+        if (e.code === 'KeyT' && this.training && this.cpu) {
+          this._dummyIdx = (this._dummyIdx + 1) % this._dummyModes.length;
+          this.cpu.mode = this._dummyModes[this._dummyIdx];
+        }
+      }
+    }
+    // Controls overlay pauses everything
+    if (this.showHelp) return;
+
+    if (this.roundState === 'intro') {
+      this.stateTimer--;
+      if (this.stateTimer <= 0) {
+        this.roundState = 'fight';
+        this.effects.triggerCinematic('FIGHT!', 70, COLORS.ACCENT);
+      }
+      for (const f of [this.team1.leader, this.team2.leader]) {
+        if (this.stateTimer > 30) f.state = ST.INTRO;
+        else if (f.state === ST.INTRO) f.setState(ST.IDLE);
+      }
+      return;
+    }
+
+    if (this.roundState === 'ko') {
+      this.stateTimer--;
+      // Keep the world moving during the KO screen. Previously nothing was updated here, so the
+      // "K.O.!" banner (driven by effects.update) never animated in and never showed, and a
+      // white flash from the killing blow stayed stuck on screen for the whole KO pause.
+      this.effects.update();
+      this.team1.updateDisplayed();
+      this.team2.updateDisplayed();
+      this.team1.leader.update(this.team2.leader, this.team1, this.effects);
+      this.team2.leader.update(this.team1.leader, this.team2, this.effects);
+      if (this.stateTimer <= 0) {
+        // In story mode, don't create ResultScene - the StoryScene handles transitions
+        if (this.storyMode) return;
+        this.game.scene = new ResultScene(this.game, this._winner(), this.team1, this.team2);
+      }
+      return;
+    }
+
+    if (this.hitstop > 0) {
+      // Hit-stop freezes the fighters, but we must NOT consume input edges here
+      // (a press during hit-stop is exactly when you'd buffer the next combo hit).
+      this.hitstop--;
+    } else {
+      // Update input mappers
+      this.input1.update();
+      if (this.cpuMode) {
+        const cpuState = this.cpu.update(this.team2.leader, this.team2, this.team1.leader, this.team1);
+        this.input2.state = cpuState;
+      } else {
+        this.input2.update();
+      }
+
+      // Leader swaps
+      if (this.input1.state.changeLeaderPrev || this.input1.state.changeLeaderNext) {
+        const d = this.input1.state.changeLeaderNext ? 1 : -1;
+        if (this.team1.swapLeader(d, this.team2)) {
+          this.effects.spawnSmoke(this.team1.leader.x, this.team1.leader.y - 80, 8);
+        }
+      }
+      if (this.input2.state.changeLeaderPrev || this.input2.state.changeLeaderNext) {
+        const d = this.input2.state.changeLeaderNext ? 1 : -1;
+        if (this.team2.swapLeader(d, this.team1)) {
+          this.effects.spawnSmoke(this.team2.leader.x, this.team2.leader.y - 80, 8);
+        }
+      }
+
+      this.team1.leader.applyInput(this.input1.state, this.team2.leader, this.team1, this.team2);
+      this.team2.leader.applyInput(this.input2.state, this.team1.leader, this.team2, this.team1);
+      this.team1.leader.update(this.team2.leader, this.team1, this.effects);
+      this.team2.leader.update(this.team1.leader, this.team2, this.effects);
+      // Signature-move name callouts (set by Fighter when a move starts)
+      for (const f of [this.team1.leader, this.team2.leader]) {
+        if (f.pendingCallout) {
+          this.effects.addText(f.x, f.y - 180, f.pendingCallout.text, f.pendingCallout.color, 60);
+          f.pendingCallout = null;
+        }
+      }
+      // Fighter collision pushback: prevent sprites from overlapping
+      this._resolveCollision();
+      this._resolveHits(this.team1.leader, this.team2.leader, this.team1, this.team2, this.combo1);
+      this._resolveHits(this.team2.leader, this.team1.leader, this.team2, this.team1, this.combo2);
+      // Update projectiles (shuriken)
+      this._updateProjectiles();
+      // Update assists (support fighters)
+      this._updateAssists();
+      // Signature-move entities (shadow clones, Kirin bolts)
+      this._updateFields();
+    }
+
+    this.effects.update();
+    this.team1.updateDisplayed();
+    this.team2.updateDisplayed();
+    this.team1.updateSubs(dt);
+    this.team2.updateSubs(dt);
+    if (this.team1.swapCooldown > 0) this.team1.swapCooldown--;
+    if (this.team2.swapCooldown > 0) this.team2.swapCooldown--;
+    this.combo1.update();
+    this.combo2.update();
+
+    if (this.training) {
+      // Practice: no timer, no KO, infinite chakra, health refills after a calm moment
+      this.roundTime = 99;
+      this.team1.leader.chakra = CFG.MAX_CHAKRA;
+      this.team2.leader.chakra = CFG.MAX_CHAKRA;
+      const hp = [this.team1.health, this.team2.health];
+      if (hp[0] !== this._lastHp[0] || hp[1] !== this._lastHp[1]) this._calm = 0; else this._calm++;
+      if (this._calm > 150 || hp[0] < 50 || hp[1] < 50) {
+        this.team1.health = this.team2.health = CFG.MAX_HEALTH; this._calm = 0;
+      }
+      this._lastHp = [this.team1.health, this.team2.health];
+    }
+    this.roundTime -= dt;
+    if (this.roundTime <= 0) {
+      this.roundTime = 0;
+      this.roundState = 'ko';
+      this.stateTimer = 150;
+      this.effects.triggerCinematic('TIME UP', 120, '#ffdc50');
+      this._endRound();
+    }
+
+    if (this.team1.isDefeated() || this.team2.isDefeated()) {
+      this.roundState = 'ko';
+      this.stateTimer = 180;
+      this.effects.triggerCinematic('K.O.!', 120, '#ff5050');
+      this._endRound();
+    }
+  }
+
+  // 1 = P1 wins, 2 = P2 wins, 0 = draw (equal health)
+  _winner() {
+    if (this.team1.health > this.team2.health) return 1;
+    if (this.team2.health > this.team1.health) return 2;
+    return 0;
+  }
+
+  // Called once when the round ends: clear cinematic freezes, knock out the loser
+  _endRound() {
+    const w = this._winner();
+    for (const [team, id] of [[this.team1, 1], [this.team2, 2]]) {
+      const f = team.leader;
+      f.cinematicFreeze = 0;
+      f.hitstun = 0;
+      // Only a fighter whose team is actually out of health is "defeated" (not on a time-up)
+      if (team.isDefeated() && w !== id) f.defeated = true;
+    }
+    this.team1.projectiles = []; this.team2.projectiles = [];
+    this.team1.assists = []; this.team2.assists = [];
+    this.team1.fields = []; this.team2.fields = [];
+  }
+
+  _resolveCollision() {
+    const f1 = this.team1.leader;
+    const f2 = this.team2.leader;
+    if (f1.defeated || f2.defeated) return;
+    const minDist = 85; // minimum horizontal distance between fighter centers
+    const dx = f2.x - f1.x;
+    const adx = Math.abs(dx);
+    if (adx < minDist) {
+      const overlap = minDist - adx;
+      const sign = dx >= 0 ? 1 : -1; // sign: direction from f1 to f2
+      // Push both fighters apart
+      f1.x -= sign * overlap / 2;
+      f2.x += sign * overlap / 2;
+      // Zero out velocity component that's pushing them together
+      if (sign > 0) { // f2 is to the right of f1
+        if (f1.vx > 0) f1.vx *= 0.3;
+        if (f2.vx < 0) f2.vx *= 0.3;
+      } else { // f2 is to the left of f1
+        if (f1.vx < 0) f1.vx *= 0.3;
+        if (f2.vx > 0) f2.vx *= 0.3;
+      }
+      // Clamp to walls
+      f1.x = Math.max(CFG.LEFT_WALL + 30, Math.min(CFG.RIGHT_WALL - 30, f1.x));
+      f2.x = Math.max(CFG.LEFT_WALL + 30, Math.min(CFG.RIGHT_WALL - 30, f2.x));
+    }
+  }
+
+  _updateProjectiles() {
+    // Process projectiles from both teams (shuriken + Naruto / Sasuke signature projectiles)
+    for (const team of [this.team1, this.team2]) {
+      const enemyTeam = team === this.team1 ? this.team2 : this.team1;
+      const enemy = enemyTeam.leader;
+      team.projectiles = team.projectiles.filter(p => {
+        p.age++;
+        // Wind-up: a held projectile (Rasenshuriken) follows its owner until released
+        if (p.hold > 0) {
+          const o = p.owner;
+          if (o.defeated || o.state !== ST.RASENSHURIKEN) {      // wind-up interrupted
+            this.effects.spawnBurst(p.x, p.y, p.color, 12, 5, 16, 3, 0.05);
+            return false;
+          }
+          p.hold--;
+          p.spin += 0.3;
+          p.facing = o.facing;
+          p.x = o.x + o.facing * 50; p.y = o.y - 120;
+          if (p.hold === 0) p.vx = o.facing * p.speed;
+          return true;
+        }
+        // Move
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += p.grav;
+        p.spin += 0.3;
+        p.lifetime--;
+        if (p.kind !== 'shuriken' && p.age % 2 === 0) {
+          this.effects.spawnBurst(p.x - Math.sign(p.vx || 1) * 12, p.y, p.color, 2, 2, 14, p.small ? 2 : 3, 0.02);
+        }
+        // Check collision with enemy
+        if (enemy && !enemy.defeated && !p.hitTargets.has(enemy)) {
+          const dh = enemy.hurtbox, r = p.hitR || 0;
+          if (p.x + r > dh.x && p.x - r < dh.x + dh.w && p.y + r > dh.y && p.y - r < dh.y + dh.h) {
+            // Hit!
+            p.hitTargets.add(enemy);
+            const connected = enemy.takeHit(p.owner, MOVES.shuriken, p.damage, p.kb, p.hs, enemyTeam, this.effects,
+              { launch: !!p.launch });
+            if (connected) {
+              team.gainStorm(p.kind === 'shuriken' ? 1 : 2);
+              this.effects.spawnHitSpark(p.x, p.y, p.owner.data.color);
+              this.hitstop = Math.max(this.hitstop, p.kind === 'shuriken' ? 3 : (p.damage >= 100 ? 9 : 4));
+            }
+            if (p.kind !== 'shuriken') this._projectileImpact(p, enemy, connected);
+            p.lifetime = 0; // projectile disappears on hit
+          }
+        }
+        // Falling projectiles (Phoenix Flower) burst when they reach the floor
+        if (p.grav && p.y >= CFG.FLOOR_Y - 10 && p.lifetime > 0) {
+          this._projectileImpact(p, null, false);
+          p.lifetime = 0;
+        }
+        // Out of bounds
+        if (p.x < 0 || p.x > CFG.SCREEN_W) p.lifetime = 0;
+        return p.lifetime > 0;
+      });
+    }
+  }
+
+  // Visual feedback when a signature projectile lands (or is blocked)
+  _projectileImpact(p, enemy, connected) {
+    const fx2 = this.game.assets.metadata.fx2;
+    if (p.hitAnim && fx2 && fx2[p.hitAnim]) {
+      this.effects.addSpriteEffect(fx2[p.hitAnim], p.x, Math.min(p.y, CFG.FLOOR_Y - 30), 18, 'center', 'fx2', p.small ? 0.7 : 1.3);
+    }
+    if (p.kind === 'rasenshuriken') {
+      // big blue burst (the Rasengan orb frames blown up) instead of the orange standard explosion
+      if (fx2 && fx2.rasengan) this.effects.addSpriteEffect(fx2.rasengan, p.x, p.y, 14, 'center', 'fx2', 1.7);
+      this.effects.spawnBurst(p.x, p.y, '#8fdcff', 30, 11, 30, 4, 0.05);
+      this.effects.shakeScreen(connected ? 16 : 8);
+      this.effects.whiteFlash(connected ? 0.55 : 0.25);
+    } else {
+      this.effects.spawnBurst(p.x, p.y, p.color, p.small ? 8 : 20, p.small ? 5 : 8, 22, p.small ? 3 : 4, 0.1);
+      if (!p.small) this.effects.shakeScreen(connected ? 8 : 4);
+    }
+  }
+
+  // ---------- Signature-move entities: Shadow Clones (Naruto) and Kirin bolts (Sasuke) ----------
+  _updateFields() {
+    for (const team of [this.team1, this.team2]) {
+      const enemyTeam = team === this.team1 ? this.team2 : this.team1;
+      const enemy = enemyTeam.leader;
+      team.fields = team.fields.filter(f => {
+        f.timer++;
+        return f.type === 'clone' ? this._updateClone(f, team, enemyTeam, enemy)
+                                  : this._updateBolt(f, team, enemyTeam, enemy);
+      });
+    }
+  }
+
+  _updateClone(c, team, enemyTeam, enemy) {
+    if (c.timer <= c.delay) return true;                 // not on screen yet
+    const t = c.timer - c.delay;
+    if (t === 1) this.effects.spawnSmoke(c.x, c.y - 60, 8);
+    if (!c.struck) {
+      if (enemy && !enemy.defeated) {
+        const dx = enemy.x - c.x;
+        c.facing = dx >= 0 ? 1 : -1;
+        if (Math.abs(dx) > 90 && t < 24) {
+          c.x += c.facing * 13;                          // rush the opponent
+        } else {
+          c.struck = true; c.strikeT = t;
+          const reach = 100, ax = c.facing === 1 ? c.x : c.x - reach;
+          const ahb = { x: ax, y: c.y - 130, w: reach, h: 120 }, dh = enemy.hurtbox;
+          if (ahb.x < dh.x + dh.w && ahb.x + ahb.w > dh.x && ahb.y < dh.y + dh.h && ahb.y + ahb.h > dh.y) {
+            const connected = enemy.takeHit(c.owner, MOVES.assist, c.damage, c.kb, c.hs, enemyTeam, this.effects,
+              { launch: c.launch });
+            if (connected) {
+              team.gainStorm(2);
+              this.effects.spawnHitSpark(enemy.x, enemy.y - 80, c.owner.data.color);
+              this.hitstop = Math.max(this.hitstop, c.launch ? 7 : 4);
+            }
+          }
+        }
+      } else {
+        c.struck = true; c.strikeT = t;
+      }
+    }
+    if (c.struck && t - c.strikeT > 10) {                // vanish in a puff of smoke
+      this.effects.spawnSmoke(c.x, c.y - 60, 8);
+      return false;
+    }
+    return true;
+  }
+
+  _updateBolt(b, team, enemyTeam, enemy) {
+    const o = b.owner;
+    if (!b.struck && (o.defeated || o.state === ST.HIT)) {   // Sasuke was interrupted: the storm fizzles
+      this.effects.spawnBurst(b.x, 120, '#9fd8ff', 12, 5, 18, 3, 0.05);
+      return false;
+    }
+    if (!b.struck) {
+      // The strike tracks the opponent, then locks on so it can be dodged
+      if (b.timer < b.lockAt && enemy && !enemy.defeated) b.x += (enemy.x - b.x) * 0.18;
+      if (b.timer === b.lockAt) this.effects.spawnBurst(b.x, CFG.FLOOR_Y, '#9fd8ff', 16, 5, 20, 3, -0.05);
+      if (b.timer >= b.strikeAt) {
+        b.struck = true; b.struckAt = b.timer;
+        if (enemy && !enemy.defeated && Math.abs(enemy.x - b.x) < 58) {
+          const connected = enemy.takeHit(o, MOVES.kirin, b.damage, 10, 60, enemyTeam, this.effects, { launch: true });
+          if (connected) {
+            team.gainStorm(4);
+            this.effects.spawnHitSpark(enemy.x, enemy.y - 80, '#9fd8ff');
+          }
+        }
+        this.effects.shakeScreen(16);
+        this.effects.whiteFlash(0.65);
+        this.hitstop = Math.max(this.hitstop, 7);
+        const fx2 = this.game.assets.metadata.fx2;
+        if (fx2) {
+          this.effects.addSpriteEffect(fx2.lightning_pillar, b.x, CFG.FLOOR_Y - 200, 14, 'center', 'fx2', [1.3, 3.2]);
+          this.effects.addSpriteEffect(fx2.bolt_base, b.x, CFG.FLOOR_Y - 50, 12, 'center', 'fx2', 1.8);
+        }
+        this.effects.spawnBurst(b.x, CFG.FLOOR_Y - 10, '#bfe8ff', 26, 9, 28, 3, 0.15);
+      }
+    }
+    return !(b.struck && b.timer - b.struckAt > 16);
+  }
+
+  // darkness (0..0.35) while any Kirin storm is gathering
+  _stormDarkness() {
+    let d = 0;
+    for (const team of [this.team1, this.team2]) {
+      for (const f of team.fields) if (f.type === 'bolt' && !f.struck) d = Math.max(d, Math.min(1, f.timer / 20) * 0.35);
+    }
+    return d;
+  }
+
+  _drawFields(ctx) {
+    for (const team of [this.team1, this.team2]) {
+      for (const f of team.fields) {
+        if (f.type === 'clone') {
+          if (f.timer <= f.delay) continue;
+          const t = f.timer - f.delay;
+          const idx = f.struck ? Math.min(3, 2 + Math.floor((t - f.strikeT) / 4)) : Math.min(1, Math.floor(t / 4));
+          const frame = this.game.assets.getFrame(f.character, 'attack1', idx);
+          const atlas = this.game.assets.getAtlas(f.character);
+          if (!frame || !atlas) continue;
+          const footY = frame.foot_y != null ? frame.foot_y : frame.src_h;
+          const centerX = frame.center_x != null ? frame.center_x : frame.src_w / 2;
+          ctx.save();
+          if (f.facing === -1) { ctx.translate(f.x, 0); ctx.scale(-1, 1); ctx.translate(-f.x, 0); }
+          ctx.globalAlpha = 0.88;
+          ctx.drawImage(atlas, frame.src_x, frame.src_y, frame.src_w, frame.src_h,
+            f.x - centerX, f.y - footY, frame.src_w, frame.src_h);
+          ctx.restore();
+        } else if (f.type === 'bolt') {
+          ctx.save();
+          if (!f.struck) {
+            // warning ring on the floor + faint crackle in the sky, getting stronger as the strike nears
+            const k = f.timer / f.strikeAt;
+            ctx.globalAlpha = 0.25 + 0.5 * k;
+            ctx.strokeStyle = f.timer >= f.lockAt ? '#ffffff' : '#9fd8ff';
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.ellipse(f.x, CFG.FLOOR_Y + 4, 58 * (1.1 - 0.3 * k), 12, 0, 0, Math.PI * 2); ctx.stroke();
+            if (f.timer > 8) {
+              ctx.globalAlpha = 0.15 + 0.35 * Math.random() * k;
+              ctx.lineWidth = 2; ctx.strokeStyle = '#cfeaff';
+              ctx.beginPath(); ctx.moveTo(f.x - 40 + Math.random() * 80, 0);
+              for (let i = 1; i <= 4; i++) ctx.lineTo(f.x + (Math.random() - 0.5) * 70, i * 30);
+              ctx.stroke();
+            }
+          } else if (f.timer - f.struckAt <= 14) {
+            // the strike itself: a jagged bolt from the sky with a white core
+            const fade = 1 - (f.timer - f.struckAt) / 16;
+            ctx.globalAlpha = Math.max(0, fade);
+            ctx.lineJoin = 'round';
+            ctx.shadowColor = '#7fd0ff'; ctx.shadowBlur = 24;
+            for (const [w, col] of [[10, '#6fc0ff'], [4, '#ffffff']]) {
+              ctx.lineWidth = w; ctx.strokeStyle = col;
+              ctx.beginPath(); ctx.moveTo(f.x + (Math.random() - 0.5) * 30, 0);
+              const N = 9;
+              for (let i = 1; i < N; i++) ctx.lineTo(f.x + (Math.random() - 0.5) * 64, (CFG.FLOOR_Y * i) / N);
+              ctx.lineTo(f.x, CFG.FLOOR_Y);
+              ctx.stroke();
+            }
+          }
+          ctx.restore();
+        }
+      }
+    }
+  }
+
+  _updateAssists() {
+    for (const team of [this.team1, this.team2]) {
+      const enemyTeam = team === this.team1 ? this.team2 : this.team1;
+      const enemy = enemyTeam.leader;
+      team.assists = team.assists.filter(a => {
+        a.timer++;
+        // Support fighter dashes toward enemy and attacks
+        if (a.timer < 15) {
+          // Dash phase: move toward enemy
+          if (enemy) {
+            const dir = enemy.x > a.x ? 1 : -1;
+            a.facing = dir;
+            a.x += dir * 8;
+          }
+        } else if (a.timer < 20) {
+          // Attack phase: check hit
+          if (!a.attacked && enemy && !enemy.defeated) {
+            a.attacked = true;
+            const reach = 80;
+            const ax = a.facing === 1 ? a.x : a.x - reach;
+            const ahb = { x: ax, y: a.y - 130, w: reach, h: 120 };
+            const dh = enemy.hurtbox;
+            if (ahb.x < dh.x + dh.w && ahb.x + ahb.w > dh.x && ahb.y < dh.y + dh.h && ahb.y + ahb.h > dh.y) {
+              const connected = enemy.takeHit(a.owner, MOVES.assist, 30, 8, 20, enemyTeam, this.effects, {});
+              if (connected) {
+                team.gainStorm(3);
+                this.effects.spawnHitSpark(enemy.x, enemy.y - 80, a.owner.data.color);
+                this.hitstop = Math.max(this.hitstop, 5);
+              }
+            }
+          }
+        } else if (a.timer >= a.maxTimer) {
+          // Disappear with smoke
+          this.effects.spawnSmoke(a.x, a.y - 60, 6);
+          return false;
+        }
+        return true;
+      });
+    }
+  }
+
+  _drawProjectiles(ctx) {
+    for (const team of [this.team1, this.team2]) {
+      for (const p of team.projectiles) {
+        // Signature projectiles are drawn from the fx2 sprite atlas
+        const fxAtlas = this.game.assets.atlases.fx2;
+        const fr = p.anim && fxAtlas ? this.game.assets.getFx(p.anim, Math.floor(p.age / 3)) : null;
+        if (fr) {
+          const w = fr.src_w * p.scale, h = fr.src_h * p.scale;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          // soft glow behind the sprite
+          const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, w * 0.75);
+          glow.addColorStop(0, p.color + 'aa'); glow.addColorStop(1, p.color + '00');
+          ctx.fillStyle = glow;
+          ctx.fillRect(-w, -w, w * 2, w * 2);
+          if (p.kind === 'rasenshuriken') ctx.rotate(p.spin * 0.6);
+          ctx.drawImage(fxAtlas, fr.src_x, fr.src_y, fr.src_w, fr.src_h, -w / 2, -h / 2, w, h);
+          ctx.restore();
+          continue;
+        }
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.spin);
+        // Draw shuriken as a spinning star shape
+        ctx.fillStyle = '#cccccc';
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < 4; i++) {
+          const angle = (i * Math.PI) / 2;
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(angle) * p.radius, Math.sin(angle) * p.radius);
+          ctx.lineTo(Math.cos(angle + 0.3) * p.radius * 0.5, Math.sin(angle + 0.3) * p.radius * 0.5);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // Center dot
+        ctx.fillStyle = '#666';
+        ctx.beginPath();
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  _drawAssists(ctx) {
+    for (const team of [this.team1, this.team2]) {
+      for (const a of team.assists) {
+        // Draw support fighter sprite
+        const frame = this.game.assets.getFrame(a.character, 'attack1', Math.floor(a.timer / 4));
+        const atlas = this.game.assets.getAtlas(a.character);
+        if (frame && atlas) {
+          const footY = frame.foot_y != null ? frame.foot_y : frame.src_h;
+          const centerX = frame.center_x != null ? frame.center_x : frame.src_w / 2;
+          ctx.save();
+          if (a.facing === -1) {
+            ctx.translate(a.x, 0);
+            ctx.scale(-1, 1);
+            ctx.translate(-a.x, 0);
+          }
+          // Semi-transparent (support fighter)
+          ctx.globalAlpha = 0.7;
+          const dx = a.x - centerX;
+          const dy = a.y - footY;
+          ctx.drawImage(atlas, frame.src_x, frame.src_y, frame.src_w, frame.src_h, dx, dy, frame.src_w, frame.src_h);
+          ctx.restore();
+        }
+      }
+    }
+  }
+
+  _resolveHits(attacker, defender, attTeam, defTeam, comboCounter) {
+    if (attacker === defender || attacker.defeated || defender.defeated) return;
+    const hb = attacker.hitbox();
+    if (!hb) return;
+    if (attacker._lastHitTargets.has(defender)) return;
+    const dh = defender.hurtbox;
+    if (hb.x < dh.x + dh.w && hb.x + hb.w > dh.x && hb.y < dh.y + dh.h && hb.y + hb.h > dh.y) {
+      // hit
+      const info = MOVES[attacker.state];
+      attacker._lastHitTargets.add(defender);
+      const opts = {
+        launch: !!info.launch, slam: !!info.slam, grab: !!info.grab, melee: true,
+      };
+      const connected = defender.takeHit(attacker, info, info.damage, info.kb, info.hs, defTeam, this.effects, opts);
+      if (connected) {
+        comboCounter.registerHit(info.damage);
+        attTeam.gainStorm(info.damage >= 30 ? 2 : 1);
+        if (info.damage >= 60) this.hitstop = 8;
+        else if (info.damage >= 25) this.hitstop = 4;
+        if (attacker.state === ST.ULTIMATE) {
+          this._triggerCinematic(`${attacker.data.display.toUpperCase()}!\n${attacker.data.ultimate.toUpperCase()}`,
+            attacker.data.color, 110, attacker, defender);
+          this.effects.shakeScreen(20);
+          this.effects.whiteFlash(0.7);
+        } else if (attacker.state === ST.LINKED) {
+          this._triggerCinematic(`LINKED SECRET!\n${attacker.data.linked.toUpperCase()}`,
+            '#ffc83c', 140, attacker, defender);
+          this.effects.shakeScreen(28);
+          this.effects.whiteFlash(0.85);
+        } else if (attacker.state === ST.NINJUTSU) {
+          const fxAnim = this.game.assets.metadata.fx.explosion || [];
+          if (fxAnim.length > 0) {
+            this.effects.addSpriteEffect(fxAnim, defender.x, defender.y - 80, 20, 'center');
+          }
+          this.effects.shakeScreen(12);
+          this.effects.whiteFlash(0.4);
+        } else if (attacker.state === ST.GRAB) {
+          this.effects.spawnSmoke(defender.x, defender.y - 60, 8);
+        }
+      }
+    }
+  }
+
+  draw(ctx) {
+    const g = this.game;
+    ctx.drawImage(g.bg, 0, 0);
+    const storm = this._stormDarkness();
+    if (storm > 0) { ctx.fillStyle = `rgba(8,12,40,${storm})`; ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H); }
+    const [sx, sy] = this.effects.getShakeOffset();
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    this.team1.leader.draw(ctx, this.effects);
+    this.team2.leader.draw(ctx, this.effects);
+    // Draw assist support fighters (behind projectiles)
+    this._drawAssists(ctx);
+    this._drawFields(ctx);
+    this.effects.drawSprites(ctx, g.assets);
+    // Draw projectiles (shuriken) on top
+    this._drawProjectiles(ctx);
+    this.effects.drawParticles(ctx);
+
+    ctx.restore();
+
+    // HUD
+    const fonts = g.fonts;
+    this.hud1.draw(ctx, fonts);
+    this.hud2.draw(ctx, fonts);
+    this.combo1.draw(ctx, fonts);
+    this.combo2.draw(ctx, fonts);
+
+    // Timer
+    ctx.save();
+    ctx.font = fonts.big;
+    ctx.fillStyle = this.roundTime > 10 ? COLORS.TEXT : '#ff5050';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const timerStr = String(Math.max(0, Math.ceil(this.roundTime))).padStart(2, '0');
+    const tw = ctx.measureText(timerStr).width;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(CFG.SCREEN_W / 2 - tw / 2 - 10, 22, tw + 20, 36);
+    ctx.strokeStyle = COLORS.ACCENT;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(CFG.SCREEN_W / 2 - tw / 2 - 10, 22, tw + 20, 36);
+    ctx.fillStyle = this.roundTime > 10 ? COLORS.TEXT : '#ff5050';
+    ctx.fillText(timerStr, CFG.SCREEN_W / 2, 40);
+    ctx.restore();
+
+    // Swap flash rings
+    for (const team of [this.team1, this.team2]) {
+      if (team.swapFlashTimer > 0) {
+        team.swapFlashTimer--;
+        const r = 40 + (12 - team.swapFlashTimer) * 4;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(team.leader.x, team.leader.y - 80, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    this.effects.drawOverlay(ctx);
+
+    if (this.roundState === 'intro') {
+      ctx.save();
+      ctx.font = fonts.huge;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const alpha = Math.min(1, this.stateTimer / 30);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#000';
+      ctx.fillText('READY?', CFG.SCREEN_W / 2 + 3, CFG.SCREEN_H / 2 - 47);
+      ctx.fillStyle = COLORS.TEXT;
+      ctx.fillText('READY?', CFG.SCREEN_W / 2, CFG.SCREEN_H / 2 - 50);
+      ctx.restore();
+    }
+
+    // Footer hint / training banner
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.font = '13px Arial';
+    ctx.fillStyle = 'rgba(200,200,220,0.7)';
+    if (this.training) {
+      const m = this.cpu ? this.cpu.mode : 'ai';
+      ctx.fillStyle = COLORS.ACCENT;
+      ctx.fillText(`TRAINING   dummy: ${m.toUpperCase()}   |   T: change dummy   H: controls   ESC: exit`, 20, CFG.SCREEN_H - 14);
+    } else {
+      ctx.fillText('H: controls', 20, CFG.SCREEN_H - 14);
+    }
+    ctx.restore();
+
+    if (this.showHelp) {
+      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+      drawControlsPanel(ctx);
+      ctx.save(); ctx.font = '16px Arial'; ctx.fillStyle = COLORS.TEXT_DIM; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED  -  press H or ESC to resume', CFG.SCREEN_W / 2, CFG.SCREEN_H - 20);
+      ctx.restore();
+    }
+
+    if (g.debug) {
+      const f1 = this.team1.leader, f2 = this.team2.leader;
+      ctx.save();
+      ctx.strokeStyle = '#0f0';
+      ctx.lineWidth = 1;
+      const dh = f1.hurtbox;
+      ctx.strokeRect(dh.x, dh.y, dh.w, dh.h);
+      const hb = f1.hitbox();
+      if (hb) { ctx.strokeStyle = '#f00'; ctx.strokeRect(hb.x, hb.y, hb.w, hb.h); }
+      const dh2 = f2.hurtbox;
+      ctx.strokeStyle = '#0f0';
+      ctx.strokeRect(dh2.x, dh2.y, dh2.w, dh2.h);
+      const hb2 = f2.hitbox();
+      if (hb2) { ctx.strokeStyle = '#f00'; ctx.strokeRect(hb2.x, hb2.y, hb2.w, hb2.h); }
+      ctx.font = fonts.small;
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'left';
+      ctx.fillText(`P1 ${f1.state} t=${f1.stateTimer} ch=${Math.floor(f1.chakra)} | P2 ${f2.state} t=${f2.stateTimer} ch=${Math.floor(f2.chakra)}`,
+        20, CFG.SCREEN_H - 60);
+      ctx.restore();
+    }
+  }
+}
+
+class ResultScene {
+  constructor(game, winner, team1, team2) {
+    this.game = game;
+    this.winner = winner;
+    this.team1 = team1;
+    this.team2 = team2;
+    this.t = 0;
+  }
+  update(dt, events) {
+    this.t++;
+    for (const e of events) {
+      if (e.type !== 'keydown') continue;
+      if (e.code === 'Enter' || e.code === 'Space') this.game.scene = new TeamSelectScene(this.game);
+      else if (e.code === 'Escape') this.game.scene = new TitleScene(this.game);
+    }
+  }
+  draw(ctx) {
+    const g = this.game;
+    ctx.drawImage(g.bg, 0, 0);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+    // winner: 1 = P1, 2 = P2 / CPU, 0 = draw (time up with equal health)
+    const team = this.winner === 2 ? this.team2 : this.team1;
+    const leader = team.leader;
+    let title;
+    if (this.winner === 0) title = 'DRAW GAME';
+    else if (this.winner === 2 && g.cpuMode !== false) title = 'CPU WINS!';
+    else title = `PLAYER ${this.winner} WINS!`;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 64px "Trebuchet MS", Arial';
+    ctx.fillStyle = '#000';
+    ctx.fillText(title, CFG.SCREEN_W / 2 + 3, 223);
+    ctx.fillStyle = COLORS.ACCENT;
+    ctx.fillText(title, CFG.SCREEN_W / 2, 220);
+    ctx.font = 'bold 32px "Trebuchet MS", Arial';
+    ctx.fillStyle = COLORS.TEXT;
+    if (this.winner !== 0) ctx.fillText(`${leader.data.display} - ${leader.data.subtitle}`, CFG.SCREEN_W / 2, 290);
+    // Winner sprite
+    const frame = leader.assets.getFrame(leader.character, 'idle', 0);
+    const atlas = leader.assets.getAtlas(leader.character);
+    if (frame && atlas) {
+      const scale = 4;
+      const dw = frame.src_w * scale, dh = frame.src_h * scale;
+      ctx.drawImage(atlas, frame.src_x, frame.src_y, frame.src_w, frame.src_h,
+        CFG.SCREEN_W / 2 - dw / 2, CFG.FLOOR_Y - dh, dw, dh);
+    }
+    if (this.t % 60 < 40) {
+      ctx.font = 'bold 24px "Trebuchet MS", Arial';
+      ctx.fillStyle = COLORS.TEXT;
+      ctx.fillText('ENTER: Rematch   |   ESC: Title', CFG.SCREEN_W / 2, CFG.FLOOR_Y - 60);
+    }
+    ctx.restore();
+  }
+}
+
+// ============================================================================
+// GAME
+// ============================================================================
+class Game {
+  constructor() {
+    this.canvas = document.getElementById('game');
+    this.ctx = this.canvas.getContext('2d');
+    this.ctx.imageSmoothingEnabled = false;
+    this.assets = new AssetManager();
+    this.input1 = new InputMapper(P1_KEYS);
+    this.input2 = new InputMapper(P2_KEYS);
+    this.running = false;
+    this.debug = false;
+    this.bg = null;
+    this.scene = null;
+    this.fonts = {
+      huge: 'bold 64px "Trebuchet MS", Arial',
+      big: 'bold 40px "Trebuchet MS", Arial',
+      med: 'bold 22px "Trebuchet MS", Arial',
+      small: '14px Arial',
+    };
+    this._events = [];
+    this._lastTime = 0;
+  }
+
+  async start() {
+    const loading = document.getElementById('loading');
+    const fill = document.getElementById('loadFill');
+    await this.assets.loadAll((loaded, total) => {
+      const pct = (loaded / total) * 100;
+      fill.style.width = pct + '%';
+    });
+    this.bg = makeBackground(this.ctx);
+    this.scene = new TitleScene(this);
+    loading.style.display = 'none';
+    this.running = true;
+
+    // Input listeners
+    // Keys the game uses that the browser would otherwise act on: page scroll (arrows/space),
+    // focus change (Tab), help (F1), Firefox quick-find ('/' = P2 Guard, ' ), etc.
+    const gameCodes = new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','Tab','F1',
+      'Slash','Quote','Period','Comma','Semicolon','BracketLeft','BracketRight']);
+    window.addEventListener('keydown', (e) => {
+      if (gameCodes.has(e.code)) e.preventDefault();
+      // OS key-repeat must not re-fire menu/dialogue events (holding ENTER skipped whole dialogues)
+      if (!e.repeat) this._events.push({ type: 'keydown', code: e.code });
+      this.input1.keyDown(e.code);
+      this.input2.keyDown(e.code);
+    });
+    window.addEventListener('keyup', (e) => {
+      this._events.push({ type: 'keyup', code: e.code });
+      this.input1.keyUp(e.code);
+      this.input2.keyUp(e.code);
+    });
+    // If the window loses focus the keyup never arrives -> the fighter keeps walking forever
+    window.addEventListener('blur', () => {
+      this.input1.releaseAll();
+      this.input2.releaseAll();
+    });
+
+    // Focus canvas
+    this.canvas.tabIndex = 0;
+    this.canvas.focus();
+
+    // Main loop - fixed 60 Hz logic step. All game logic is counted in frames, so running one
+    // update per requestAnimationFrame made the game 2x-2.4x too fast on 120/144 Hz monitors.
+    const STEP = 1 / 60;
+    let acc = 0;
+    this._lastTime = performance.now();
+    const loop = (t) => {
+      if (!this.running) return;
+      acc += Math.min((t - this._lastTime) / 1000, 0.25);
+      this._lastTime = t;
+      let steps = 0;
+      while (acc >= STEP && steps < 5) {
+        this.update(STEP);
+        acc -= STEP;
+        steps++;
+      }
+      if (steps === 5) acc = 0; // too far behind (slow device / background tab) - don't spiral
+      this.draw();
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+
+  update(dt) {
+    const events = this._events;
+    this._events = [];
+    this.scene.update(dt, events);
+  }
+
+  draw() {
+    this.ctx.clearRect(0, 0, CFG.SCREEN_W, CFG.SCREEN_H);
+    this.scene.draw(this.ctx);
+  }
+}
+
+// Bootstrap
+window.addEventListener('load', () => {
+  const game = new Game();
+  window._game = game; // expose for debugging
+  game.start().catch(err => {
+    console.error('Failed to start game:', err);
+    document.getElementById('loading').innerHTML =
+      '<div style="color:#f80;">Failed to load. Make sure the page is served via http:// (not file://)<br>Run: python3 -m http.server in this folder</div>';
+  });
+});
+</script>
+</body>
+</html>
